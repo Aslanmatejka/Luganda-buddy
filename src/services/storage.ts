@@ -5,6 +5,7 @@
  */
 
 import { supabase, getDeviceId } from '../lib/supabase'
+import { safeGetItem, safeSetItem } from '../lib/storageSafe'
 import type { Progress } from '../types'
 
 const LS_KEY = 'luganda-buddy-progress-v1'
@@ -20,7 +21,7 @@ const empty = (): Progress => ({
 
 function fromLS(): Progress {
   try {
-    const raw = localStorage.getItem(LS_KEY)
+    const raw = safeGetItem(LS_KEY)
     if (!raw) return empty()
     const p = JSON.parse(raw) as Partial<Progress>
     return {
@@ -35,7 +36,7 @@ function fromLS(): Progress {
 }
 
 function toLS(p: Progress): void {
-  localStorage.setItem(LS_KEY, JSON.stringify(p))
+  safeSetItem(LS_KEY, JSON.stringify(p))
 }
 
 // ── Supabase helpers ──────────────────────────────────────────────────────────

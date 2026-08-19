@@ -14,18 +14,19 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/storageSafe'
 
 const ADMIN_EMAIL = 'aslanabdulkarim84@gmail.com'
 const LS_KEY      = 'luganda-buddy-admin-token'
 
 function getSavedToken(): string | null {
-  return localStorage.getItem(LS_KEY)
+  return safeGetItem(LS_KEY)
 }
 function saveToken(token: string): void {
-  localStorage.setItem(LS_KEY, token)
+  safeSetItem(LS_KEY, token)
 }
 function clearToken(): void {
-  localStorage.removeItem(LS_KEY)
+  safeRemoveItem(LS_KEY)
 }
 
 type Status = 'checking' | 'granted' | 'denied'

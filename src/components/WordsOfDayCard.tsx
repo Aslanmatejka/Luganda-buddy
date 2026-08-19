@@ -35,41 +35,46 @@ function WordChip({
   }
 
   return (
-    <button
-      type="button"
-      onClick={flip}
+    <div
+      className={`animate-slide-up group relative flex flex-1 flex-col items-center overflow-hidden rounded-[18px] border ${accent.border} bg-[#1e1e28] p-3.5 text-center`}
       style={{ animationDelay: delay }}
-      className={`animate-slide-up group relative flex flex-1 flex-col items-center overflow-hidden rounded-[18px] border ${accent.border} bg-[#1e1e28] p-3.5 text-center transition-transform active:scale-[0.95]`}
     >
       {/* colour wash */}
       <div className={`pointer-events-none absolute inset-0 ${accent.glow} opacity-60`} />
 
-      <div className={`relative ${animating ? (flipped ? 'flip-enter' : 'flip-exit') : ''}`}>
-        {!flipped ? (
-          <>
-            <p className="font-display text-[16px] font-semibold leading-snug text-white">
-              {phrase.luganda}
-            </p>
-            <p className="mt-1 text-[10px] font-bold text-[#5a5a72]">
-              {phrase.pronunciation}
-            </p>
-            <p className="mt-2.5 text-[9px] font-extrabold uppercase tracking-widest text-[#5a5a72]">
-              tap
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="text-[14px] font-extrabold text-white">
-              {phrase.english}
-            </p>
-            <p className="mt-1.5 text-[10px] font-semibold leading-snug text-[#8b8b9e]">
-              {phrase.explanation.length > 55
-                ? phrase.explanation.slice(0, 53) + '…'
-                : phrase.explanation}
-            </p>
-          </>
-        )}
-      </div>
+      <button
+        type="button"
+        onClick={flip}
+        className="relative flex w-full flex-1 flex-col items-center transition-transform active:scale-[0.95]"
+        title="Tap to flip"
+      >
+        <div className={animating ? (flipped ? 'flip-enter' : 'flip-exit') : ''}>
+          {!flipped ? (
+            <>
+              <p className="font-display text-[16px] font-semibold leading-snug text-white">
+                {phrase.luganda}
+              </p>
+              <p className="mt-1 text-[10px] font-bold text-[#5a5a72]">
+                {phrase.pronunciation}
+              </p>
+              <p className="mt-2.5 text-[9px] font-extrabold uppercase tracking-widest text-[#5a5a72]">
+                tap
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-[14px] font-extrabold text-white">
+                {phrase.english}
+              </p>
+              <p className="mt-1.5 text-[10px] font-semibold leading-snug text-[#8b8b9e]">
+                {phrase.explanation.length > 55
+                  ? phrase.explanation.slice(0, 53) + '…'
+                  : phrase.explanation}
+              </p>
+            </>
+          )}
+        </div>
+      </button>
 
       <button
         type="button"
@@ -78,7 +83,7 @@ function WordChip({
       >
         🔊 Hear
       </button>
-    </button>
+    </div>
   )
 }
 

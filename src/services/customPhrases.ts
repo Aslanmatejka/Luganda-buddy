@@ -6,6 +6,7 @@
 
 import { phrases as builtIn } from '../data/content'
 import { supabase, getDeviceId } from '../lib/supabase'
+import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/storageSafe'
 import type { CategoryId, Phrase } from '../types'
 
 const LS_PHRASES_KEY = 'luganda-buddy-custom-phrases-v1'
@@ -14,7 +15,7 @@ const LS_PHRASES_KEY = 'luganda-buddy-custom-phrases-v1'
 
 export function loadCustomPhrases(): Phrase[] {
   try {
-    const raw = localStorage.getItem(LS_PHRASES_KEY)
+    const raw = safeGetItem(LS_PHRASES_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed) ? (parsed as Phrase[]) : []
@@ -24,7 +25,7 @@ export function loadCustomPhrases(): Phrase[] {
 }
 
 function saveCustomPhrasesLS(phrases: Phrase[]): void {
-  localStorage.setItem(LS_PHRASES_KEY, JSON.stringify(phrases))
+  safeSetItem(LS_PHRASES_KEY, JSON.stringify(phrases))
 }
 
 // ── Supabase phrase helpers ───────────────────────────────────────────────────
@@ -103,7 +104,7 @@ export function upsertCustomPhrase(phrase: Phrase): void {
 
 export function deleteCustomPhrase(id: string): void {
   saveCustomPhrasesLS(loadCustomPhrases().filter((p) => p.id !== id))
-  removeAudio(id)
+  void removeAudio(id)
 
   if (supabase) {
     void Promise.resolve(
@@ -182,16 +183,23 @@ export async function fetchRemoteAudio(): Promise<void> {
 export async function migrateAudioFromLS(): Promise<void> {
   const LS_AUDIO_KEY = 'luganda-buddy-audio-v1'
   try {
-    const raw = localStorage.getItem(LS_AUDIO_KEY)
+    const raw = safeGetItem(LS_AUDIO_KEY)
     if (!raw) return
+
+    // Old audio blobs can be huge and freeze the app on parse — skip if too large
+    if (raw.length > 400_000) {
+      safeRemoveItem(LS_AUDIO_KEY)
+      return
+    }
+
     const map = JSON.parse(raw) as Record<string, string>
     const existing = await idbLoadAllAudio()
     for (const [id, url] of Object.entries(map)) {
       if (!existing[id] && url) await idbSaveAudio(id, url)
     }
-    localStorage.removeItem(LS_AUDIO_KEY)
+    safeRemoveItem(LS_AUDIO_KEY)
   } catch {
-    // silent
+    safeRemoveItem(LS_AUDIO_KEY)
   }
 }
 

@@ -59,10 +59,15 @@ export default function App() {
   const [showClaim, setShowClaim] = useState(false)
 
   useEffect(() => {
-    warmUpSpeech()
-    void fetchRemoteCustomPhrases()
-    void fetchRemoteAudio()
-    void migrateAudioFromLS()
+    // Defer sync so the UI paints first — heavy storage work won't block opening
+    const run = () => {
+      warmUpSpeech()
+      void fetchRemoteCustomPhrases()
+      void fetchRemoteAudio()
+      void migrateAudioFromLS()
+    }
+    const t = window.setTimeout(run, 100)
+    return () => window.clearTimeout(t)
   }, [])
 
   const startLesson = (categoryId?: CategoryId) => {
