@@ -14,10 +14,10 @@ import type { CategoryId, Phrase, Screen } from './types'
 
 function Shell({ children }: { children: ReactNode }) {
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-cream">
-      <div className="pointer-events-none absolute -top-24 -right-16 h-64 w-64 rounded-full bg-peach/80 blur-3xl" />
-      <div className="pointer-events-none absolute top-48 -left-20 h-56 w-56 rounded-full bg-honey/50 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-24 right-0 h-64 w-64 rounded-full bg-blush/40 blur-3xl" />
+    <div className="relative min-h-dvh overflow-hidden bg-[#0e0e12]">
+      <div className="pointer-events-none absolute -top-32 -right-20 h-72 w-72 rounded-full bg-violet/10 blur-3xl" />
+      <div className="pointer-events-none absolute top-64 -left-24 h-60 w-60 rounded-full bg-coral/8 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-32 right-0 h-72 w-72 rounded-full bg-emerald/6 blur-3xl" />
       <div className="relative pb-[env(safe-area-inset-bottom)]">{children}</div>
     </div>
   )
@@ -54,7 +54,7 @@ function AdminEntryZone({ onActivate }: { onActivate: () => void }) {
 
 export default function App() {
   const { progress, completeLesson } = useProgress()
-  const { isAdmin, isChecking, claimAdmin } = useAdminAccess()
+  const { isAdmin, isChecking, signIn } = useAdminAccess()
   const [screen, setScreen] = useState<Screen>({ name: 'home' })
   const [showClaim, setShowClaim] = useState(false)
 
@@ -144,7 +144,7 @@ export default function App() {
         {/* Claim modal */}
         {showClaim && !isAdmin && (
           <AdminClaimModal
-            onClaim={claimAdmin}
+            onSignIn={signIn}
             onDismiss={() => setShowClaim(false)}
           />
         )}

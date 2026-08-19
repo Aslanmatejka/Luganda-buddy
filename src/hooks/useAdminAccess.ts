@@ -1,93 +1,107 @@
 /**
- * Admin access — no login required.
+ * Admin sign-in — works on any device.
  *
  * Flow:
- * 1. Check localStorage for a previously granted flag (instant, synchronous).
- * 2. If not found, verify against Supabase: does the admin_access row for
- *    aslanabdulkarim84@gmail.com have this device_id?  If yes, grant locally.
- * 3. To claim admin for the first time, the user enters their email in a tiny
- *    prompt.  If it matches the authorised email and the row doesn't exist yet,
- *    we insert it and grant access permanently on this device.
+ * 1. On load: check localStorage for a previously granted session token.
+ * 2. If token exists: verify it against Supabase (token column in admin_access).
+ * 3. To sign in: enter email + password.  We compare the password against the
+ *    bcrypt hash stored in admin_access.  On match, save a random session token
+ *    to localStorage and to Supabase so any future device check can verify it.
+ *
+ * Why not real auth?  Because the app has no user accounts at all.  This tiny
+ * hidden sign-in is purely so Aslan can edit phrases from any device.
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { supabase, getDeviceId } from '../lib/supabase'
+import { supabase } from '../lib/supabase'
 
 const ADMIN_EMAIL = 'aslanabdulkarim84@gmail.com'
-const LS_KEY = 'luganda-buddy-is-admin'
+const LS_KEY      = 'luganda-buddy-admin-token'
 
-function readLocalFlag(): boolean {
-  return localStorage.getItem(LS_KEY) === '1'
+function getSavedToken(): string | null {
+  return localStorage.getItem(LS_KEY)
 }
-
-function setLocalFlag(): void {
-  localStorage.setItem(LS_KEY, '1')
+function saveToken(token: string): void {
+  localStorage.setItem(LS_KEY, token)
+}
+function clearToken(): void {
+  localStorage.removeItem(LS_KEY)
 }
 
 type Status = 'checking' | 'granted' | 'denied'
 
 export function useAdminAccess() {
-  const [status, setStatus] = useState<Status>(readLocalFlag() ? 'granted' : 'checking')
+  const [status, setStatus] = useState<Status>(getSavedToken() ? 'checking' : 'denied')
 
-  // On mount, verify against Supabase unless already locally granted
+  // Verify saved token against Supabase on mount
   useEffect(() => {
-    if (status === 'granted') return
+    const token = getSavedToken()
+    if (!token) { setStatus('denied'); return }
     if (!supabase) { setStatus('denied'); return }
 
     void Promise.resolve(
       supabase
         .from('admin_access')
-        .select('device_id')
+        .select('token')
         .eq('email', ADMIN_EMAIL)
-        .maybeSingle(),
+        .maybeSingle()
     ).then(({ data }) => {
-      if (data && (data as { device_id: string }).device_id === getDeviceId()) {
-        setLocalFlag()
+      if (data && (data as { token: string }).token === token) {
         setStatus('granted')
       } else {
+        clearToken()
         setStatus('denied')
       }
-    }).catch(() => setStatus('denied'))
-  }, [status])
+    }).catch(() => {
+      // Offline — trust the local token
+      setStatus('granted')
+    })
+  }, [])
 
   /**
-   * Called from the claim modal.  Inserts the row if the email matches and
-   * the slot is unclaimed, then grants access on this device.
-   * Returns 'granted' | 'wrong_email' | 'already_claimed' | 'error'.
+   * Sign in with email + password.
+   * The password is checked server-side by comparing against a stored hash
+   * via a Supabase RPC function `verify_admin_password(p_email, p_password)`.
+   * Returns true/false.  On success, a fresh session token is written.
    */
-  const claimAdmin = useCallback(async (email: string): Promise<'granted' | 'wrong_email' | 'already_claimed' | 'error'> => {
-    const trimmed = email.trim().toLowerCase()
-    if (trimmed !== ADMIN_EMAIL) return 'wrong_email'
+  const signIn = useCallback(async (email: string, password: string): Promise<
+    'granted' | 'wrong_credentials' | 'error'
+  > => {
+    const trimmedEmail = email.trim().toLowerCase()
+    if (trimmedEmail !== ADMIN_EMAIL) return 'wrong_credentials'
     if (!supabase) return 'error'
 
-    // Check if already claimed by another device
-    const { data: existing } = await supabase
+    // Call Supabase RPC that compares the password hash
+    const { data, error } = await supabase.rpc('verify_admin_password', {
+      p_email:    trimmedEmail,
+      p_password: password,
+    })
+
+    if (error || !data) return 'wrong_credentials'
+
+    // Generate a session token and persist it
+    const token = crypto.randomUUID()
+    saveToken(token)
+
+    // Update the token in Supabase so other devices can verify
+    await supabase
       .from('admin_access')
-      .select('device_id')
-      .eq('email', ADMIN_EMAIL)
-      .maybeSingle()
+      .update({ token })
+      .eq('email', trimmedEmail)
 
-    if (existing) {
-      // Row exists — grant if it's this device, reject otherwise
-      if ((existing as { device_id: string }).device_id === getDeviceId()) {
-        setLocalFlag()
-        setStatus('granted')
-        return 'granted'
-      }
-      return 'already_claimed'
-    }
-
-    // Claim it
-    const { error } = await supabase
-      .from('admin_access')
-      .insert({ email: ADMIN_EMAIL, device_id: getDeviceId() })
-
-    if (error) return 'error'
-
-    setLocalFlag()
     setStatus('granted')
     return 'granted'
   }, [])
 
-  return { isAdmin: status === 'granted', isChecking: status === 'checking', claimAdmin }
+  const signOut = useCallback(() => {
+    clearToken()
+    setStatus('denied')
+  }, [])
+
+  return {
+    isAdmin:    status === 'granted',
+    isChecking: status === 'checking',
+    signIn,
+    signOut,
+  }
 }
