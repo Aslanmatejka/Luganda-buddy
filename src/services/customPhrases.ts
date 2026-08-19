@@ -127,10 +127,21 @@ export function allPhrases(): Phrase[] {
 
 import { idbLoadAudio, idbLoadAllAudio, idbRemoveAudio, idbSaveAudio } from './audioDB'
 
-export async function saveAudio(phraseId: string, dataUrl: string): Promise<void> {
-  await idbSaveAudio(phraseId, dataUrl)
+/** Convert Blob → base64 data URL for Supabase sync */
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+}
+
+export async function saveAudio(phraseId: string, source: Blob | string): Promise<void> {
+  await idbSaveAudio(phraseId, source)
 
   if (supabase) {
+    const dataUrl = source instanceof Blob ? await blobToDataUrl(source) : source
     void Promise.resolve(
       supabase.from('audio_recordings').upsert(
         { phrase_id: phraseId, device_id: getDeviceId(), data_url: dataUrl, updated_at: new Date().toISOString() },

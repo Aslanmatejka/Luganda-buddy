@@ -5,9 +5,11 @@ import {
   allPhrases,
   deleteCustomPhrase,
   newPhraseId,
+  removeAudio,
+  saveAudio,
   upsertCustomPhrase,
 } from '../services/customPhrases'
-import { idbLoadAudio, idbRemoveAudio, idbSaveAudio } from '../services/audioDB'
+import { hasAudioIndexed, idbLoadAudio } from '../services/audioDB'
 import type { CategoryId, Phrase } from '../types'
 
 const builtInIds = new Set(builtInPhrases.map((p) => p.id))
@@ -16,166 +18,133 @@ function emptyDraft(categoryId: CategoryId = 'greetings'): Omit<Phrase, 'id'> {
   return { luganda: '', english: '', pronunciation: '', explanation: '', categoryId }
 }
 
-// ─── PreviewPlayer – plays any audio data URL ────────────────────────────────
+// ─── PlayButton ───────────────────────────────────────────────────────────────
 
-function PreviewPlayer({ dataUrl, label = '▶ Preview recording' }: { dataUrl: string; label?: string }) {
+function PlayButton({ url, label = '▶' }: { url: string; label?: string }) {
   const [playing, setPlaying] = useState(false)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const ref = useRef<HTMLAudioElement | null>(null)
+
+  useEffect(() => () => { ref.current?.pause() }, [])
 
   const toggle = () => {
     if (playing) {
-      audioRef.current?.pause()
+      ref.current?.pause()
       setPlaying(false)
       return
     }
-    audioRef.current?.pause()
-    const a = new Audio(dataUrl)
-    audioRef.current = a
+    ref.current?.pause()
+    const a = new Audio(url)
+    ref.current = a
     setPlaying(true)
     a.onended = () => setPlaying(false)
     a.onerror = () => setPlaying(false)
     a.play().catch(() => setPlaying(false))
   }
 
-  // Pause when unmounted
-  useEffect(() => () => { audioRef.current?.pause() }, [])
-
   return (
     <button
       type="button"
       onClick={toggle}
-      className={`flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-bold transition ${
+      className={`rounded-xl border px-2.5 py-1.5 text-sm font-bold transition ${
         playing
           ? 'border-sky/40 bg-sky/15 text-sky'
-          : 'border-white/12 bg-white/5 text-[#c0c0d8]'
+          : 'border-emerald/30 bg-emerald/10 text-emerald'
       }`}
     >
-      {playing ? (
-        <>
-          <span className="flex gap-[3px]">
-            {[0, 1, 2].map((i) => (
-              <span
-                key={i}
-                className="inline-block h-3.5 w-1 rounded-full bg-sky"
-                style={{ animation: `bounce 0.8s ${i * 0.15}s ease-in-out infinite alternate` }}
-              />
-            ))}
-          </span>
-          Playing… tap to pause
-        </>
-      ) : (
-        label
-      )}
+      {playing ? '⏸' : label}
     </button>
   )
 }
 
-// ─── Standalone recorder — lives outside the form so it survives re-renders ──
+// ─── PhraseAudioControls — inline record + play for one phrase ───────────────
 
-function AudioRecorder({
+function PhraseAudioControls({
   phraseId,
-  onAudioReady,
+  onSaved,
 }: {
   phraseId: string
-  onAudioReady: (dataUrl: string) => void
+  onSaved: () => void
 }) {
-  const { state, dataUrl, start, stop, reset } = useAudioRecorder()
-  const [saved, setSaved]       = useState(false)
-  const [saving, setSaving]     = useState(false)
+  const { state, blob, previewUrl, errorMsg, start, stop, reset } = useAudioRecorder()
+  const [savedUrl, setSavedUrl] = useState<string | null>(null)
+  const [hasVoice, setHasVoice] = useState(() => hasAudioIndexed(phraseId))
+  const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [current, setCurrent]   = useState<string | null>(null)
-  // Timer shown while recording
-  const [secs, setSecs]         = useState(0)
-  const timerRef                = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [secs, setSecs] = useState(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // Load saved audio on mount
   useEffect(() => {
-    setSaved(false)
-    setSaveError(null)
-    idbLoadAudio(phraseId)
-      .then((url) => setCurrent(url))
-      .catch(() => setCurrent(null))
+    let revoked: string | null = null
+    idbLoadAudio(phraseId).then((url) => {
+      if (url) {
+        revoked = url
+        setSavedUrl(url)
+        setHasVoice(true)
+      } else {
+        setSavedUrl(null)
+        setHasVoice(hasAudioIndexed(phraseId))
+      }
+    })
+    return () => { if (revoked) URL.revokeObjectURL(revoked) }
   }, [phraseId])
 
-  // Start / stop timer with recording state
+  // Recording timer
   useEffect(() => {
     if (state === 'recording') {
       setSecs(0)
       timerRef.current = setInterval(() => setSecs((s) => s + 1), 1000)
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current)
+    } else if (timerRef.current) {
+      clearInterval(timerRef.current)
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [state])
 
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
   const handleSave = async () => {
-    if (!dataUrl) return
+    if (!blob) return
     setSaving(true)
     setSaveError(null)
     try {
-      await idbSaveAudio(phraseId, dataUrl)
-      // Verify the write actually landed
-      const check = await idbLoadAudio(phraseId)
-      if (!check) throw new Error('Write verified empty — storage may be blocked')
-      setCurrent(check)
-      setSaved(true)
-      onAudioReady(check)
+      await saveAudio(phraseId, blob)
+      // Reload to get fresh object URL
+      const url = await idbLoadAudio(phraseId)
+      if (!url) throw new Error('Save failed — please try again')
+      setSavedUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return url })
+      setHasVoice(true)
       reset()
+      onSaved()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      setSaveError(`Save failed: ${msg}. Try a different browser or check storage permissions.`)
+      setSaveError(err instanceof Error ? err.message : 'Save failed')
     } finally {
       setSaving(false)
     }
   }
 
   const handleDelete = async () => {
-    await idbRemoveAudio(phraseId)
-    setCurrent(null)
-    setSaved(false)
-    setSaveError(null)
+    await removeAudio(phraseId)
+    setSavedUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null })
+    setHasVoice(false)
     reset()
+    onSaved()
   }
 
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-
   return (
-    <div className="flex flex-col gap-2">
+    <div className="mt-2 flex flex-col gap-1.5 border-t border-white/6 pt-2">
       {/* Saved recording */}
-      {current && state === 'idle' && (
-        <div className="flex items-center gap-2">
-          <div className="flex-1">
-            <PreviewPlayer dataUrl={current} label="▶ Play saved recording" />
-          </div>
+      {hasVoice && savedUrl && state !== 'done' && (
+        <div className="flex items-center gap-1.5">
+          <PlayButton url={savedUrl} label="▶ Play" />
+          <span className="flex-1 text-[10px] font-bold text-emerald">Voice saved</span>
           <button
             type="button"
             onClick={() => void handleDelete()}
-            className="rounded-xl bg-rose/15 border border-rose/25 px-3 py-2 text-sm font-bold text-rose"
-            title="Delete recording"
+            className="rounded-lg border border-rose/20 bg-rose/10 px-2 py-1 text-xs font-bold text-rose"
           >
             🗑
           </button>
         </div>
-      )}
-
-      {saved && (
-        <p className="text-center text-xs font-extrabold text-emerald">✓ Recording saved!</p>
-      )}
-
-      {saveError && (
-        <p className="rounded-xl bg-rose/10 border border-rose/20 px-3 py-2 text-xs font-semibold text-rose">
-          ⚠️ {saveError}
-        </p>
-      )}
-
-      {/* Record button */}
-      {state === 'idle' && (
-        <button
-          type="button"
-          onClick={start}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-violet/30 bg-violet/10 px-3 py-2.5 text-sm font-bold text-violet"
-        >
-          🎙 {current ? 'Re-record' : 'Record your voice'}
-        </button>
       )}
 
       {/* Recording in progress */}
@@ -183,41 +152,51 @@ function AudioRecorder({
         <button
           type="button"
           onClick={stop}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-rose/80 px-3 py-2.5 text-sm font-bold text-white"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-rose/80 py-2 text-xs font-bold text-white"
         >
-          <span className="flex gap-[3px]">
-            {[0,1,2].map((i) => (
-              <span key={i} className="inline-block h-3 w-[3px] rounded-full bg-white"
-                style={{ animation: `bounce 0.7s ${i*0.12}s ease-in-out infinite alternate` }} />
-            ))}
-          </span>
+          <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
           {fmt(secs)} — tap to stop
         </button>
       )}
 
-      {/* Preview + save/discard */}
-      {state === 'done' && dataUrl && (
-        <div className="flex flex-col gap-2">
-          <PreviewPlayer dataUrl={dataUrl} label="▶ Preview before saving" />
-          <div className="flex gap-2">
+      {/* Preview + save after recording */}
+      {state === 'done' && blob && previewUrl && (
+        <div className="flex flex-col gap-1.5">
+          <PlayButton url={previewUrl} label="▶ Preview" />
+          <div className="flex gap-1.5">
             <button
               type="button"
               onClick={() => void handleSave()}
               disabled={saving}
-              className="flex-1 rounded-xl bg-emerald px-3 py-2.5 text-sm font-bold text-white disabled:opacity-60 shadow-[0_4px_14px_rgba(52,211,153,0.3)]"
+              className="flex-1 rounded-xl bg-emerald py-2 text-xs font-bold text-white disabled:opacity-50"
             >
-              {saving ? '…Saving' : '💾 Save recording'}
+              {saving ? 'Saving…' : '💾 Save voice'}
             </button>
             <button
               type="button"
               onClick={reset}
               disabled={saving}
-              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-bold text-[#8b8b9e]"
+              className="rounded-xl border border-white/10 px-3 py-2 text-xs font-bold text-[#8b8b9e]"
             >
-              Discard
+              ✕
             </button>
           </div>
         </div>
+      )}
+
+      {/* Record button */}
+      {(state === 'idle' || state === 'error') && (
+        <button
+          type="button"
+          onClick={start}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-violet/25 bg-violet/10 py-2 text-xs font-bold text-violet"
+        >
+          🎙 {hasVoice ? 'Re-record' : 'Record voice'}
+        </button>
+      )}
+
+      {(errorMsg || saveError) && (
+        <p className="text-[10px] font-semibold text-rose">⚠️ {errorMsg ?? saveError}</p>
       )}
     </div>
   )
@@ -236,13 +215,8 @@ function PhraseModal({
 }) {
   const isNew = !initial
   const [draft, setDraft] = useState<Phrase>(() =>
-    initial
-      ? { ...initial }
-      : { id: newPhraseId('greetings'), ...emptyDraft() },
+    initial ? { ...initial } : { id: newPhraseId('greetings'), ...emptyDraft() },
   )
-  // Track the phraseId used for audio separately — it must NOT change when
-  // category changes, so the recording stays attached to the right id.
-  const [audioId] = useState(() => draft.id)
 
   const set = (key: keyof Phrase) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -253,7 +227,6 @@ function PhraseModal({
     setDraft((d) => ({
       ...d,
       categoryId: catId,
-      // Only regenerate id for NEW phrases — and keep audioId unchanged
       id: isNew ? newPhraseId(catId) : d.id,
     }))
   }
@@ -261,9 +234,8 @@ function PhraseModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!draft.luganda.trim() || !draft.english.trim()) return
-    // Save with the stable audioId so audio lookup always works
-    upsertCustomPhrase({ ...draft, id: audioId })
-    onSaved({ ...draft, id: audioId })
+    upsertCustomPhrase({ ...draft, custom: true })
+    onSaved(draft)
   }
 
   const inputCls =
@@ -276,111 +248,38 @@ function PhraseModal({
           <h2 className="font-display text-2xl font-semibold text-white">
             {isNew ? 'New phrase' : 'Edit phrase'}
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/8 text-[#8b8b9e]"
-          >×</button>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full bg-white/8 text-[#8b8b9e]">×</button>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* Category */}
           <div>
-            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">
-              Category
-            </label>
+            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">Category</label>
             <select value={draft.categoryId} onChange={onCategoryChange} className={inputCls}>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>
               ))}
             </select>
           </div>
-
-          {/* Luganda */}
           <div>
-            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">
-              Luganda word / phrase
-            </label>
-            <input
-              type="text"
-              value={draft.luganda}
-              onChange={set('luganda')}
-              placeholder="e.g. Oli otya?"
-              required
-              className={inputCls}
-            />
+            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">Luganda</label>
+            <input type="text" value={draft.luganda} onChange={set('luganda')} required className={inputCls} placeholder="e.g. Oli otya?" />
           </div>
-
-          {/* English */}
           <div>
-            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">
-              English meaning
-            </label>
-            <input
-              type="text"
-              value={draft.english}
-              onChange={set('english')}
-              placeholder="e.g. How are you?"
-              required
-              className={inputCls}
-            />
+            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">English</label>
+            <input type="text" value={draft.english} onChange={set('english')} required className={inputCls} placeholder="e.g. How are you?" />
           </div>
-
-          {/* Pronunciation */}
           <div>
-            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">
-              Pronunciation hint
-            </label>
-            <input
-              type="text"
-              value={draft.pronunciation}
-              onChange={set('pronunciation')}
-              placeholder="e.g. oh-lee oh-CHA"
-              className={inputCls}
-            />
+            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">Pronunciation</label>
+            <input type="text" value={draft.pronunciation} onChange={set('pronunciation')} className={inputCls} placeholder="e.g. oh-lee oh-CHA" />
           </div>
-
-          {/* Explanation */}
           <div>
-            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">
-              Short explanation
-            </label>
-            <textarea
-              value={draft.explanation}
-              onChange={set('explanation')}
-              placeholder="A friendly note about this phrase."
-              rows={2}
-              className={`${inputCls} resize-none`}
-            />
+            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">Explanation</label>
+            <textarea value={draft.explanation} onChange={set('explanation')} rows={2} className={`${inputCls} resize-none`} />
           </div>
 
-          {/* Voice recorder */}
-          <div className="rounded-2xl border border-white/8 bg-white/3 p-4">
-            <p className="mb-1 text-sm font-bold text-white">🎙 Voice recording</p>
-            <p className="mb-3 text-xs font-semibold text-[#5a5a72]">
-              Record yourself saying the phrase. Press Save recording before saving the phrase.
-            </p>
-            <AudioRecorder
-              phraseId={audioId}
-              onAudioReady={() => {}}
-            />
-          </div>
-
-          {/* Actions */}
           <div className="flex gap-3 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-bold text-white"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="flex-1 rounded-2xl bg-violet px-4 py-3 font-bold text-white shadow-[0_6px_20px_rgba(139,92,246,0.30)]"
-            >
-              Save phrase
-            </button>
+            <button type="button" onClick={onClose} className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-bold text-white">Cancel</button>
+            <button type="submit" className="flex-1 rounded-2xl bg-violet px-4 py-3 font-bold text-white">Save phrase</button>
           </div>
         </form>
       </div>
@@ -395,95 +294,57 @@ function PhraseRow({
   onEdit,
   onDelete,
   refreshKey,
+  onAudioChange,
 }: {
   phrase: Phrase
   onEdit: () => void
   onDelete: () => void
   refreshKey: number
+  onAudioChange: () => void
 }) {
-  const isBuiltIn   = builtInIds.has(phrase.id)
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
-  const [playing, setPlaying]   = useState(false)
-  const audioRef                = useRef<HTMLAudioElement | null>(null)
-
-  useEffect(() => {
-    idbLoadAudio(phrase.id)
-      .then((d) => setAudioUrl(d))
-      .catch(() => {})
-  }, [phrase.id, refreshKey])
-
-  const togglePlay = () => {
-    if (!audioUrl) return
-    if (playing) {
-      audioRef.current?.pause()
-      setPlaying(false)
-      return
-    }
-    audioRef.current?.pause()
-    const a = new Audio(audioUrl)
-    audioRef.current = a
-    setPlaying(true)
-    a.onended = () => setPlaying(false)
-    a.onerror = () => setPlaying(false)
-    a.play().catch(() => setPlaying(false))
-  }
+  const isBuiltIn = builtInIds.has(phrase.id)
+  const [expanded, setExpanded] = useState(false)
 
   return (
     <div className="rounded-2xl border border-white/6 bg-[#16161d] px-4 py-3">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-display text-[15px] font-semibold text-white">
-              {phrase.luganda}
-            </span>
-            {audioUrl && (
-              <span className="rounded-full bg-emerald/15 px-2 py-0.5 text-[10px] font-extrabold text-emerald">
-                🎙 voice
-              </span>
+            <span className="font-display text-[15px] font-semibold text-white">{phrase.luganda}</span>
+            {hasAudioIndexed(phrase.id) && (
+              <span className="rounded-full bg-emerald/15 px-2 py-0.5 text-[10px] font-extrabold text-emerald">🎙 voice</span>
             )}
             {phrase.custom && (
-              <span className="rounded-full bg-violet/15 px-2 py-0.5 text-[10px] font-extrabold text-violet">
-                custom
-              </span>
+              <span className="rounded-full bg-violet/15 px-2 py-0.5 text-[10px] font-extrabold text-violet">custom</span>
             )}
           </div>
           <p className="mt-0.5 text-xs font-semibold text-[#5a5a72]">{phrase.english}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          {audioUrl && (
-            <button
-              type="button"
-              onClick={togglePlay}
-              title={playing ? 'Pause' : 'Play recording'}
-              className={`rounded-xl border px-2.5 py-1.5 text-sm font-bold transition ${
-                playing
-                  ? 'border-sky/40 bg-sky/15 text-sky'
-                  : 'border-emerald/30 bg-emerald/10 text-emerald'
-              }`}
-            >
-              {playing ? '⏸' : '▶'}
-            </button>
-          )}
           <button
             type="button"
-            onClick={onEdit}
-            className="rounded-xl border border-white/8 bg-white/5 px-2.5 py-1.5 text-sm"
-            title="Edit"
+            onClick={() => setExpanded((v) => !v)}
+            className={`rounded-xl border px-2.5 py-1.5 text-sm font-bold transition ${
+              expanded ? 'border-violet/40 bg-violet/15 text-violet' : 'border-white/8 bg-white/5 text-[#8b8b9e]'
+            }`}
+            title="Record / play voice"
           >
-            ✏️
+            🎙
           </button>
+          <button type="button" onClick={onEdit} className="rounded-xl border border-white/8 bg-white/5 px-2.5 py-1.5 text-sm" title="Edit">✏️</button>
           {!isBuiltIn && (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="rounded-xl border border-rose/20 bg-rose/10 px-2.5 py-1.5 text-sm"
-              title="Delete"
-            >
-              🗑
-            </button>
+            <button type="button" onClick={onDelete} className="rounded-xl border border-rose/20 bg-rose/10 px-2.5 py-1.5 text-sm" title="Delete">🗑</button>
           )}
         </div>
       </div>
+
+      {expanded && (
+        <PhraseAudioControls
+          key={`${phrase.id}-${refreshKey}`}
+          phraseId={phrase.id}
+          onSaved={onAudioChange}
+        />
+      )}
     </div>
   )
 }
@@ -491,10 +352,10 @@ function PhraseRow({
 // ─── AdminScreen ──────────────────────────────────────────────────────────────
 
 export function AdminScreen({ onClose }: { onClose: () => void }) {
-  const [phrases, setPhrases]   = useState<Phrase[]>(() => allPhrases())
-  const [filter, setFilter]     = useState<CategoryId | 'all'>('all')
-  const [search, setSearch]     = useState('')
-  const [editing, setEditing]   = useState<Phrase | null | 'new'>(null)
+  const [phrases, setPhrases] = useState<Phrase[]>(() => allPhrases())
+  const [filter, setFilter] = useState<CategoryId | 'all'>('all')
+  const [search, setSearch] = useState('')
+  const [editing, setEditing] = useState<Phrase | null | 'new'>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
   const refresh = useCallback(() => {
@@ -503,37 +364,22 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
   }, [])
 
   const visible = phrases.filter((p) => {
-    const catOk  = filter === 'all' || p.categoryId === filter
-    const q      = search.toLowerCase()
-    const textOk = !q || p.luganda.toLowerCase().includes(q) || p.english.toLowerCase().includes(q)
-    return catOk && textOk
+    const catOk = filter === 'all' || p.categoryId === filter
+    const q = search.toLowerCase()
+    return catOk && (!q || p.luganda.toLowerCase().includes(q) || p.english.toLowerCase().includes(q))
   })
 
   return (
     <div className="relative mx-auto flex min-h-dvh max-w-md flex-col bg-[#0e0e12] px-4 pb-10 pt-6">
-      {/* Header */}
       <header className="mb-5 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-[#8b8b9e]"
-        >
-          ← Back
-        </button>
+        <button type="button" onClick={onClose} className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-[#8b8b9e]">← Back</button>
         <div className="flex-1">
           <h1 className="font-display text-2xl font-semibold text-white">Admin</h1>
-          <p className="text-xs font-semibold text-[#5a5a72]">{phrases.length} phrases</p>
+          <p className="text-xs font-semibold text-[#5a5a72]">{phrases.length} phrases · tap 🎙 to record</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setEditing('new')}
-          className="rounded-2xl bg-violet px-4 py-2.5 text-sm font-bold text-white"
-        >
-          + Add
-        </button>
+        <button type="button" onClick={() => setEditing('new')} className="rounded-2xl bg-violet px-4 py-2.5 text-sm font-bold text-white">+ Add</button>
       </header>
 
-      {/* Search */}
       <input
         type="search"
         placeholder="Search…"
@@ -542,7 +388,6 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
         className="mb-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white placeholder:text-[#5a5a72] focus:outline-none focus:ring-2 focus:ring-violet/30"
       />
 
-      {/* Category filter */}
       <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
         {(['all', ...categories.map((c) => c.id)] as const).map((id) => {
           const cat = id === 'all' ? null : categories.find((c) => c.id === id)!
@@ -552,9 +397,7 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
               type="button"
               onClick={() => setFilter(id)}
               className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-extrabold transition ${
-                filter === id
-                  ? 'bg-violet text-white'
-                  : 'border border-white/8 bg-white/5 text-[#8b8b9e]'
+                filter === id ? 'bg-violet text-white' : 'border border-white/8 bg-white/5 text-[#8b8b9e]'
               }`}
             >
               {cat ? `${cat.emoji} ${cat.name}` : 'All'}
@@ -563,12 +406,9 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
         })}
       </div>
 
-      {/* List */}
       <div className="flex flex-col gap-2">
         {visible.length === 0 && (
-          <p className="py-10 text-center text-sm font-semibold text-[#5a5a72]">
-            Nothing matches.
-          </p>
+          <p className="py-10 text-center text-sm font-semibold text-[#5a5a72]">Nothing matches.</p>
         )}
         {visible.map((phrase) => (
           <PhraseRow
@@ -576,6 +416,7 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
             phrase={phrase}
             refreshKey={refreshKey}
             onEdit={() => setEditing(phrase)}
+            onAudioChange={refresh}
             onDelete={() => {
               if (confirm(`Delete "${phrase.luganda}"?`)) {
                 deleteCustomPhrase(phrase.id)
@@ -586,15 +427,11 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
-      {/* Modal */}
       {editing && (
         <PhraseModal
           initial={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null)
-            refresh()
-          }}
+          onSaved={() => { setEditing(null); refresh() }}
         />
       )}
     </div>
