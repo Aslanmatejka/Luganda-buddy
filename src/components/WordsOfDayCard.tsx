@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { wordsOfDay } from '../services/lesson'
 import { speakLuganda } from '../services/speech'
+import { idbLoadAudio } from '../services/audioDB'
 import type { Phrase } from '../types'
 
 const ACCENTS = [
@@ -20,8 +21,6 @@ function WordChip({
 }) {
   const [flipped, setFlipped] = useState(false)
   const [animating, setAnimating] = useState(false)
-  const hasAudio = Boolean(phrase.audioDataUrl)
-
   const flip = () => {
     if (animating) return
     setAnimating(true)
@@ -31,8 +30,10 @@ function WordChip({
 
   const speak = (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (hasAudio) new Audio(phrase.audioDataUrl).play().catch(() => {})
-    else speakLuganda(phrase.luganda)
+    idbLoadAudio(phrase.id).then((url) => {
+      if (url) new Audio(url).play().catch(() => {})
+      else speakLuganda(phrase.luganda)
+    }).catch(() => speakLuganda(phrase.luganda))
   }
 
   return (
@@ -77,7 +78,7 @@ function WordChip({
         onClick={speak}
         className={`relative mt-3 flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-extrabold ${accent.tag}`}
       >
-        {hasAudio ? '🎙' : '🔊'} Hear
+        🔊 Hear
       </button>
     </button>
   )

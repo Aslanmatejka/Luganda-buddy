@@ -7,7 +7,7 @@ import { CompleteScreen } from './screens/CompleteScreen'
 import { HomeScreen } from './screens/HomeScreen'
 import { LessonScreen } from './screens/LessonScreen'
 import { getCategory } from './data/content'
-import { fetchRemoteAudio, fetchRemoteCustomPhrases } from './services/customPhrases'
+import { fetchRemoteAudio, fetchRemoteCustomPhrases, migrateAudioFromLS } from './services/customPhrases'
 import { nextCategoryId } from './services/lesson'
 import { warmUpSpeech } from './services/speech'
 import type { CategoryId, Phrase, Screen } from './types'
@@ -62,6 +62,7 @@ export default function App() {
     warmUpSpeech()
     void fetchRemoteCustomPhrases()
     void fetchRemoteAudio()
+    void migrateAudioFromLS()
   }, [])
 
   const startLesson = (categoryId?: CategoryId) => {

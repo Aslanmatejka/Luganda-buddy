@@ -4,12 +4,10 @@ import { useAudioRecorder } from '../hooks/useAudioRecorder'
 import {
   allPhrases,
   deleteCustomPhrase,
-  loadAudio,
   newPhraseId,
-  removeAudio,
-  saveAudio,
   upsertCustomPhrase,
 } from '../services/customPhrases'
+import { idbLoadAudio, idbRemoveAudio, idbSaveAudio } from '../services/audioDB'
 import { speakLuganda } from '../services/speech'
 import type { CategoryId, Phrase } from '../types'
 
@@ -25,12 +23,23 @@ function emptyDraft(categoryId: CategoryId = 'greetings'): Omit<Phrase, 'id'> {
 
 function AudioRow({ phrase, onSaved }: { phrase: Phrase; onSaved: () => void }) {
   const { state, dataUrl, start, stop, reset } = useAudioRecorder()
-  const [current, setCurrent] = useState<string | null>(() => loadAudio(phrase.id))
+  const [current, setCurrent] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
 
+  // Load from IndexedDB on mount and whenever phrase.id changes
+  useEffect(() => {
+    setLoading(true)
+    idbLoadAudio(phrase.id)
+      .then(setCurrent)
+      .catch(() => setCurrent(null))
+      .finally(() => setLoading(false))
+  }, [phrase.id])
+
   const playStored = () => {
     if (!current) return
+    audioRef.current?.pause()
     const audio = new Audio(current)
     audioRef.current = audio
     setPlaying(true)
@@ -38,20 +47,27 @@ function AudioRow({ phrase, onSaved }: { phrase: Phrase; onSaved: () => void }) 
     audio.play().catch(() => setPlaying(false))
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!dataUrl) return
-    saveAudio(phrase.id, dataUrl)
-    setCurrent(dataUrl)
-    reset()
-    onSaved()
+    try {
+      await idbSaveAudio(phrase.id, dataUrl)
+      setCurrent(dataUrl)
+      reset()
+      onSaved()
+    } catch (err) {
+      console.error('Failed to save audio:', err)
+      alert('Could not save the recording. Your browser may have blocked storage access.')
+    }
   }
 
-  const handleDelete = () => {
-    removeAudio(phrase.id)
+  const handleDelete = async () => {
+    await idbRemoveAudio(phrase.id)
     setCurrent(null)
     reset()
     onSaved()
   }
+
+  if (loading) return <p className="mt-2 text-xs text-[#5a5a72]">Loading…</p>
 
   return (
     <div className="mt-3 flex flex-col gap-2">
@@ -66,8 +82,8 @@ function AudioRow({ phrase, onSaved }: { phrase: Phrase; onSaved: () => void }) 
           </button>
           <button
             type="button"
-            onClick={handleDelete}
-            className="rounded-xl bg-blush/60 px-3 py-2 text-sm font-bold text-ink"
+            onClick={() => { void handleDelete() }}
+            className="rounded-xl bg-rose/20 border border-rose/20 px-3 py-2 text-sm font-bold text-rose"
             title="Delete recording"
           >
             🗑
@@ -99,15 +115,15 @@ function AudioRow({ phrase, onSaved }: { phrase: Phrase; onSaved: () => void }) 
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={handleSave}
-            className="flex-1 rounded-xl bg-sage px-3 py-2 text-sm font-bold text-white"
+            onClick={() => { void handleSave() }}
+            className="flex-1 rounded-xl bg-emerald/80 px-3 py-2 text-sm font-bold text-white"
           >
-            Save recording
+            💾 Save recording
           </button>
           <button
             type="button"
             onClick={reset}
-            className="rounded-xl bg-peach/60 px-3 py-2 text-sm font-bold text-ink"
+            className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-sm font-bold text-[#8b8b9e]"
           >
             Discard
           </button>
@@ -276,7 +292,10 @@ function PhraseRow({
   onDelete: () => void
 }) {
   const isBuiltIn = builtInIds.has(phrase.id)
-  const hasAudio = Boolean(loadAudio(phrase.id))
+  const [hasAudio, setHasAudio] = useState(false)
+  useEffect(() => {
+    idbLoadAudio(phrase.id).then((d) => setHasAudio(Boolean(d))).catch(() => {})
+  }, [phrase.id])
 
   return (
     <div className="flex items-start gap-3 rounded-2xl bg-card px-4 py-3 shadow-sm">

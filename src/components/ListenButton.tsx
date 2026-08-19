@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { isSpeechSupported, speakLuganda } from '../services/speech'
+import { idbLoadAudio } from '../services/audioDB'
 
 function SoundWave({ speaking }: { speaking: boolean }) {
   const bars = [6, 14, 10, 18, 8, 16, 6]
@@ -21,21 +22,35 @@ function SoundWave({ speaking }: { speaking: boolean }) {
 
 export function ListenButton({
   text,
-  audioDataUrl,
+  phraseId,
+  audioDataUrl: propAudioUrl,
   autoPlay = false,
 }: {
   text: string
+  phraseId?: string
+  /** Pass a pre-loaded data URL directly (optional — phraseId is preferred) */
   audioDataUrl?: string
   autoPlay?: boolean
 }) {
   const [speaking, setSpeaking] = useState(false)
+  const [resolvedAudio, setResolvedAudio] = useState<string | null>(propAudioUrl ?? null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const ttsOk = isSpeechSupported()
-  const hasCustom = Boolean(audioDataUrl)
+
+  // Load audio from IndexedDB when phraseId is provided
+  useEffect(() => {
+    if (!phraseId) { setResolvedAudio(propAudioUrl ?? null); return }
+    idbLoadAudio(phraseId)
+      .then((url) => setResolvedAudio(url ?? propAudioUrl ?? null))
+      .catch(() => setResolvedAudio(propAudioUrl ?? null))
+  }, [phraseId, propAudioUrl])
+
+  const hasCustom = Boolean(resolvedAudio)
 
   const playCustom = () => {
+    if (!resolvedAudio) return
     audioRef.current?.pause()
-    const a = new Audio(audioDataUrl)
+    const a = new Audio(resolvedAudio)
     audioRef.current = a
     setSpeaking(true)
     a.onended = () => setSpeaking(false)
@@ -55,7 +70,7 @@ export function ListenButton({
     const t = window.setTimeout(play, 500)
     return () => { clearTimeout(t); audioRef.current?.pause() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, audioDataUrl, autoPlay])
+  }, [text, resolvedAudio, autoPlay])
 
   const enabled = hasCustom || ttsOk
 

@@ -9,7 +9,6 @@ import { supabase, getDeviceId } from '../lib/supabase'
 import type { CategoryId, Phrase } from '../types'
 
 const LS_PHRASES_KEY = 'luganda-buddy-custom-phrases-v1'
-const LS_AUDIO_KEY = 'luganda-buddy-audio-v1'
 
 // ── local phrase helpers ──────────────────────────────────────────────────────
 
@@ -113,43 +112,23 @@ export function deleteCustomPhrase(id: string): void {
   }
 }
 
-/** All phrases: built-in merged with custom (custom overrides built-in by id), with audio attached. */
+/** All phrases: built-in merged with custom. Audio is loaded separately via loadAudio(). */
 export function allPhrases(): Phrase[] {
   const custom = loadCustomPhrases()
   const customIds = new Set(custom.map((p) => p.id))
-  const audioMap = loadAudioMap()
-
-  const attach = (p: Phrase): Phrase => {
-    const audio = audioMap[p.id]
-    return audio ? { ...p, audioDataUrl: audio } : p
-  }
-
-  const base = builtIn.filter((p) => !customIds.has(p.id)).map(attach)
-  return [...base, ...custom.map(attach)]
+  const base = builtIn.filter((p) => !customIds.has(p.id))
+  return [...base, ...custom]
 }
 
-// ── audio storage ─────────────────────────────────────────────────────────────
+// ── audio storage — IndexedDB ─────────────────────────────────────────────────
+// Audio recordings are stored in IndexedDB (no size limit).
+// The old localStorage audio key is intentionally left alone for migration below.
 
-function loadAudioMap(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(LS_AUDIO_KEY)
-    if (!raw) return {}
-    return JSON.parse(raw) as Record<string, string>
-  } catch {
-    return {}
-  }
-}
+import { idbLoadAudio, idbLoadAllAudio, idbRemoveAudio, idbSaveAudio } from './audioDB'
 
-function saveAudioMap(map: Record<string, string>): void {
-  localStorage.setItem(LS_AUDIO_KEY, JSON.stringify(map))
-}
+export async function saveAudio(phraseId: string, dataUrl: string): Promise<void> {
+  await idbSaveAudio(phraseId, dataUrl)
 
-export function saveAudio(phraseId: string, dataUrl: string): void {
-  const map = loadAudioMap()
-  map[phraseId] = dataUrl
-  saveAudioMap(map)
-
-  // background sync to Supabase
   if (supabase) {
     void Promise.resolve(
       supabase.from('audio_recordings').upsert(
@@ -160,10 +139,8 @@ export function saveAudio(phraseId: string, dataUrl: string): void {
   }
 }
 
-export function removeAudio(phraseId: string): void {
-  const map = loadAudioMap()
-  delete map[phraseId]
-  saveAudioMap(map)
+export async function removeAudio(phraseId: string): Promise<void> {
+  await idbRemoveAudio(phraseId)
 
   if (supabase) {
     void Promise.resolve(
@@ -176,11 +153,11 @@ export function removeAudio(phraseId: string): void {
   }
 }
 
-export function loadAudio(phraseId: string): string | null {
-  return loadAudioMap()[phraseId] ?? null
+export async function loadAudio(phraseId: string): Promise<string | null> {
+  return idbLoadAudio(phraseId)
 }
 
-/** Pull audio recordings from Supabase and merge into local map. */
+/** Pull audio recordings from Supabase and store in IndexedDB. */
 export async function fetchRemoteAudio(): Promise<void> {
   if (!supabase) return
   try {
@@ -190,15 +167,29 @@ export async function fetchRemoteAudio(): Promise<void> {
       .eq('device_id', getDeviceId())
     if (error || !data) return
 
-    const map = loadAudioMap()
-    let changed = false
+    const existing = await idbLoadAllAudio()
     for (const row of data as { phrase_id: string; data_url: string }[]) {
-      if (!map[row.phrase_id]) {
-        map[row.phrase_id] = row.data_url
-        changed = true
+      if (!existing[row.phrase_id] && row.data_url) {
+        await idbSaveAudio(row.phrase_id, row.data_url)
       }
     }
-    if (changed) saveAudioMap(map)
+  } catch {
+    // silent
+  }
+}
+
+/** Migrate any audio previously stored in localStorage to IndexedDB. */
+export async function migrateAudioFromLS(): Promise<void> {
+  const LS_AUDIO_KEY = 'luganda-buddy-audio-v1'
+  try {
+    const raw = localStorage.getItem(LS_AUDIO_KEY)
+    if (!raw) return
+    const map = JSON.parse(raw) as Record<string, string>
+    const existing = await idbLoadAllAudio()
+    for (const [id, url] of Object.entries(map)) {
+      if (!existing[id] && url) await idbSaveAudio(id, url)
+    }
+    localStorage.removeItem(LS_AUDIO_KEY)
   } catch {
     // silent
   }

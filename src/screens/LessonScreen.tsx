@@ -117,7 +117,7 @@ function LearnStep({ phrase, onContinue }: { phrase: Phrase; onContinue: () => v
         </span>
       </section>
 
-      <ListenButton text={phrase.luganda} audioDataUrl={phrase.audioDataUrl} autoPlay />
+      <ListenButton text={phrase.luganda} phraseId={phrase.id} autoPlay />
 
       <p className="text-center text-xs font-semibold text-[#5a5a72]">
         Hear it · Whisper it · No pressure
@@ -151,7 +151,7 @@ function QuizStep({
       </div>
 
       <div className="mx-auto w-full">
-        <ListenButton text={phrase.luganda} audioDataUrl={phrase.audioDataUrl} />
+        <ListenButton text={phrase.luganda} phraseId={phrase.id} />
       </div>
 
       <div className="flex flex-col gap-2.5">
@@ -205,7 +205,7 @@ function FeedbackStep({
         </p>
       </section>
 
-      <ListenButton text={phrase.luganda} audioDataUrl={phrase.audioDataUrl} />
+      <ListenButton text={phrase.luganda} phraseId={phrase.id} />
 
       <button
         type="button"
