@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ListenButton } from '../components/ListenButton'
-import { Mascot } from '../components/Mascot'
+import { Button, IconButton } from '../components/ui/Button'
+import { Panel } from '../components/ui/Panel'
 import { getCategory } from '../data/content'
 import { buildLesson, quizChoices } from '../services/lesson'
 import type { CategoryId, Phrase } from '../types'
@@ -26,7 +27,6 @@ export function LessonScreen({
   const phrase = lesson[index]
   const choices = useMemo(() => (phrase ? quizChoices(phrase) : []), [phrase])
 
-
   if (!phrase) return null
 
   const correct = picked === phrase.english
@@ -41,44 +41,28 @@ export function LessonScreen({
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-md flex-col px-4 pb-10 pt-5">
-      {/* ── Top bar ── */}
       <header className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={onExit}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/8 border border-white/10 text-white/60 transition active:scale-90"
-          aria-label="Go home"
-        >
-          ←
-        </button>
-
-        <div className="flex flex-1 gap-1.5">
+        <IconButton label="Go home" onClick={onExit}>←</IconButton>
+        <div className="flex flex-1 gap-1">
           {lesson.map((item, i) => (
             <span
               key={item.id}
-              className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
-                i < index  ? 'bg-emerald' :
-                i === index ? 'bg-violet' :
-                'bg-white/10'
+              className={`h-1 flex-1 rounded-full transition-colors ${
+                i < index ? 'bg-violet' : i === index ? 'bg-white/40' : 'bg-white/10'
               }`}
             />
           ))}
         </div>
-
-        <span className="min-w-[32px] text-right text-xs font-bold text-[#5a5a72]">
+        <span className="min-w-[36px] text-right text-xs tabular-nums text-[#6b6b80]">
           {index + 1}/{lesson.length}
         </span>
       </header>
 
-      {/* ── Category label ── */}
-      <div className="mt-3 flex items-center justify-center gap-1.5">
-        <span className="rounded-full bg-white/6 border border-white/8 px-3 py-1 text-[11px] font-bold text-[#8b8b9e]">
-          {category.emoji} {category.name}
-        </span>
-      </div>
+      <p className="mt-4 text-center text-xs text-[#6b6b80]">
+        {category.emoji} {category.name}
+      </p>
 
-      {/* ── Step ── */}
-      <div key={`${phrase.id}-${step}`} className="animate-pop mt-4 flex flex-1 flex-col">
+      <div key={`${phrase.id}-${step}`} className="mt-5 flex flex-1 flex-col">
         {step === 'learn' && (
           <LearnStep phrase={phrase} onContinue={() => setStep('quiz')} />
         )}
@@ -93,46 +77,25 @@ export function LessonScreen({
   )
 }
 
-// ─── Learn step ───────────────────────────────────────────────────────────────
-
 function LearnStep({ phrase, onContinue }: { phrase: Phrase; onContinue: () => void }) {
   return (
     <div className="flex flex-1 flex-col gap-4">
-      <div className="flex justify-center pt-1">
-        <Mascot mood="listen" size={80} />
-      </div>
-
-      {/* Word card */}
-      <section className="gradient-border relative overflow-hidden rounded-[24px] bg-[#16161d] p-7 text-center">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(139,92,246,0.08),transparent_60%)]" />
-        <p className="shimmer-text font-display text-5xl font-semibold leading-tight">
-          {phrase.luganda}
-        </p>
-        <p className="mt-4 text-xl font-bold text-coral">{phrase.english}</p>
-        <span className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-white/5 border border-white/8 px-3 py-1.5">
-          <span className="text-sm">🗣</span>
-          <span className="text-sm font-semibold text-[#8b8b9e]">{phrase.pronunciation}</span>
-        </span>
-      </section>
+      <Panel className="p-6 text-center">
+        <p className="text-3xl font-semibold leading-tight text-white">{phrase.luganda}</p>
+        <p className="mt-3 text-lg font-medium text-[#c4c4d4]">{phrase.english}</p>
+        <p className="mt-2 text-sm text-[#6b6b80]">{phrase.pronunciation}</p>
+      </Panel>
 
       <ListenButton phraseId={phrase.id} autoPlay />
 
-      <p className="text-center text-xs font-semibold text-[#5a5a72]">
-        Hear it · Whisper it · No pressure
-      </p>
+      <p className="text-center text-xs text-[#5a5a72]">Listen, then continue when ready</p>
 
-      <button
-        type="button"
-        onClick={onContinue}
-        className="mt-auto w-full rounded-2xl bg-emerald px-5 py-4 text-[15px] font-bold text-[#0e0e12] shadow-[0_8px_28px_rgba(52,211,153,0.30)] transition active:scale-[0.97]"
-      >
-        Ready for the quiz →
-      </button>
+      <div className="mt-auto">
+        <Button onClick={onContinue}>Continue to quiz</Button>
+      </div>
     </div>
   )
 }
-
-// ─── Quiz step ────────────────────────────────────────────────────────────────
 
 function QuizStep({
   phrase, choices, onChoose,
@@ -140,28 +103,22 @@ function QuizStep({
   return (
     <div className="flex flex-1 flex-col gap-4">
       <div className="text-center">
-        <p className="text-[11px] font-extrabold uppercase tracking-widest text-[#5a5a72]">
-          What does this mean?
-        </p>
-        <p className="mt-3 font-display text-4xl font-semibold text-white">
-          {phrase.luganda}
-        </p>
+        <p className="label">What does this mean?</p>
+        <p className="mt-3 text-2xl font-semibold text-white">{phrase.luganda}</p>
       </div>
 
-      <div className="mx-auto w-full">
-        <ListenButton phraseId={phrase.id} />
-      </div>
+      <ListenButton phraseId={phrase.id} />
 
-      <div className="flex flex-col gap-2.5">
-        {choices.map((choice, i) => (
+      <div className="flex flex-col gap-2">
+        {choices.map((choice) => (
           <button
             key={choice}
             type="button"
             onClick={() => onChoose(choice)}
-            className={`animate-slide-up stagger-${Math.min(i + 1, 5)} flex w-full items-center justify-between rounded-2xl border border-white/8 bg-[#16161d] px-5 py-4 text-left text-[15px] font-semibold text-white transition active:scale-[0.97] active:bg-white/10`}
+            className="flex w-full items-center justify-between rounded-xl border border-white/15 bg-[#16161d] px-4 py-3.5 text-left text-[15px] font-medium text-white transition-colors hover:border-white/25 hover:bg-[#1a1a24] active:bg-[#1e1e28]"
           >
             {choice}
-            <span className="text-[#3a3a50] text-sm">→</span>
+            <span className="text-[#5a5a72]" aria-hidden="true">→</span>
           </button>
         ))}
       </div>
@@ -169,53 +126,32 @@ function QuizStep({
   )
 }
 
-// ─── Feedback step ────────────────────────────────────────────────────────────
-
 function FeedbackStep({
   phrase, correct, picked, isLast, onNext,
 }: { phrase: Phrase; correct: boolean; picked: string; isLast: boolean; onNext: () => void }) {
   return (
     <div className="flex flex-1 flex-col gap-4">
-      <section
-        className={`relative overflow-hidden rounded-[24px] p-6 text-center border ${
-          correct
-            ? 'bg-emerald/8 border-emerald/25'
-            : 'bg-rose/8 border-rose/25'
+      <Panel
+        className={`p-6 text-center ${
+          correct ? 'border-emerald/25 bg-emerald/5' : 'border-amber/25 bg-amber/5'
         }`}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.04),transparent_60%)]" />
-        <p className="animate-bounce-in relative font-display text-4xl font-semibold">
-          {correct ? '🎉 Correct!' : '🤔 Not quite'}
+        <p className="text-lg font-semibold text-white">
+          {correct ? 'Correct' : 'Not quite'}
         </p>
-        <p className="relative mt-3 font-display text-3xl font-semibold text-white">
-          {phrase.luganda}
-        </p>
-        <p className={`relative mt-1 text-lg font-bold ${correct ? 'text-emerald' : 'text-rose'}`}>
-          {phrase.english}
-        </p>
+        <p className="mt-3 text-2xl font-semibold text-white">{phrase.luganda}</p>
+        <p className="mt-1 text-base font-medium text-[#c4c4d4]">{phrase.english}</p>
         {!correct && (
-          <p className="relative mt-2 text-xs font-semibold text-[#8b8b9e]">
-            You picked "{picked}" — that's fine, now you know it.
-          </p>
+          <p className="mt-2 text-xs text-[#8b8b9e]">You chose "{picked}"</p>
         )}
-        <p className="relative mt-3 text-sm font-medium leading-relaxed text-[#8b8b9e]">
-          {phrase.explanation}
-        </p>
-      </section>
+        <p className="mt-3 text-sm leading-relaxed text-[#8b8b9e]">{phrase.explanation}</p>
+      </Panel>
 
       <ListenButton phraseId={phrase.id} />
 
-      <button
-        type="button"
-        onClick={onNext}
-        className={`w-full rounded-2xl px-5 py-4 text-[15px] font-bold transition active:scale-[0.97] ${
-          correct
-            ? 'bg-violet text-white shadow-[0_8px_28px_rgba(139,92,246,0.35)]'
-            : 'bg-white/8 border border-white/10 text-white'
-        }`}
-      >
-        {isLast ? 'Finish lesson 🎓' : 'Next →'}
-      </button>
+      <Button variant={correct ? 'primary' : 'secondary'} onClick={onNext}>
+        {isLast ? 'Finish lesson' : 'Next phrase'}
+      </Button>
     </div>
   )
 }

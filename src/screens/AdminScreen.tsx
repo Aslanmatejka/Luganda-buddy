@@ -10,6 +10,7 @@ import {
   saveAudio,
   upsertCustomPhrase,
 } from '../services/customPhrases'
+import { Button } from '../components/ui/Button'
 import type { CategoryId, Phrase } from '../types'
 
 const builtInIds = new Set(builtInPhrases.map((p) => p.id))
@@ -45,13 +46,13 @@ function PlayButton({ url, label = '▶' }: { url: string; label?: string }) {
     <button
       type="button"
       onClick={toggle}
-      className={`rounded-xl border px-2.5 py-1.5 text-sm font-bold transition ${
+      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
         playing
-          ? 'border-sky/40 bg-sky/15 text-sky'
-          : 'border-emerald/30 bg-emerald/10 text-emerald'
+          ? 'border-violet/30 bg-violet/10 text-violet'
+          : 'border-white/15 bg-white/5 text-white hover:bg-white/8'
       }`}
     >
-      {playing ? '⏸' : label}
+      {playing ? 'Pause' : label}
     </button>
   )
 }
@@ -104,69 +105,65 @@ function PhraseAudioControls({ phraseId }: { phraseId: string }) {
     <div className="mt-2 flex flex-col gap-1.5 border-t border-white/6 pt-2">
       {/* Saved recording */}
       {hasAudio && savedUrl && state !== 'done' && (
-        <div className="flex items-center gap-1.5">
-          <PlayButton url={savedUrl} label="▶ Play" />
-          <span className="flex-1 text-[10px] font-bold text-emerald">Voice saved ✓</span>
+        <div className="flex items-center gap-2">
+          <PlayButton url={savedUrl} label="Play" />
+          <span className="flex-1 text-xs text-[#6b6b80]">Saved</span>
           <button
             type="button"
             onClick={() => void handleDelete()}
-            className="rounded-lg border border-rose/20 bg-rose/10 px-2 py-1 text-xs font-bold text-rose"
+            className="rounded-lg border border-rose/25 px-2 py-1 text-xs font-medium text-rose hover:bg-rose/10"
           >
-            🗑
+            Delete
           </button>
         </div>
       )}
 
-      {/* Recording in progress */}
       {state === 'recording' && (
         <button
           type="button"
           onClick={stop}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-rose/80 py-2 text-xs font-bold text-white"
+          className="w-full rounded-lg border border-rose/30 bg-rose/10 py-2 text-xs font-semibold text-rose"
         >
-          <span className="h-2 w-2 animate-pulse rounded-full bg-white" />
-          {fmt(secs)} — tap to stop
+          {fmt(secs)} — Stop recording
         </button>
       )}
 
-      {/* Preview + save after recording */}
       {state === 'done' && blob && previewUrl && (
-        <div className="flex flex-col gap-1.5">
-          <PlayButton url={previewUrl} label="▶ Preview" />
-          <div className="flex gap-1.5">
+        <div className="flex flex-col gap-2">
+          <PlayButton url={previewUrl} label="Preview" />
+          <div className="flex gap-2">
             <button
               type="button"
               onClick={() => void handleSave()}
               disabled={saving}
-              className="flex-1 rounded-xl bg-emerald py-2 text-xs font-bold text-white disabled:opacity-50"
+              className="flex-1 rounded-lg border border-white/20 bg-white py-2 text-xs font-semibold text-[#0e0e12] disabled:opacity-50"
             >
-              {saving ? 'Saving…' : '💾 Save voice'}
+              {saving ? 'Saving…' : 'Save voice'}
             </button>
             <button
               type="button"
               onClick={reset}
               disabled={saving}
-              className="rounded-xl border border-white/10 px-3 py-2 text-xs font-bold text-[#8b8b9e]"
+              className="rounded-lg border border-white/10 px-3 py-2 text-xs text-[#8b8b9e]"
             >
-              ✕
+              Cancel
             </button>
           </div>
         </div>
       )}
 
-      {/* Record button */}
       {(state === 'idle' || state === 'error') && (
         <button
           type="button"
           onClick={start}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-violet/25 bg-violet/10 py-2 text-xs font-bold text-violet"
+          className="w-full rounded-lg border border-white/15 py-2 text-xs font-semibold text-white hover:bg-white/5"
         >
-          🎙 {hasAudio ? 'Re-record' : 'Record voice'}
+          {hasAudio ? 'Re-record' : 'Record voice'}
         </button>
       )}
 
       {(errorMsg || saveError) && (
-        <p className="text-[10px] font-semibold text-rose">⚠️ {errorMsg ?? saveError}</p>
+        <p className="text-xs text-rose">{errorMsg ?? saveError}</p>
       )}
     </div>
   )
@@ -248,8 +245,8 @@ function PhraseModal({
           </div>
 
           <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose} className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-bold text-white">Cancel</button>
-            <button type="submit" className="flex-1 rounded-2xl bg-violet px-4 py-3 font-bold text-white">Save phrase</button>
+            <Button type="button" variant="secondary" onClick={onClose} className="flex-1">Cancel</Button>
+            <button type="submit" className="inline-flex min-h-[48px] flex-1 items-center justify-center rounded-xl bg-white px-4 py-3 text-[15px] font-semibold text-[#0e0e12]">Save phrase</button>
           </div>
         </form>
       </div>
@@ -279,28 +276,27 @@ function PhraseRow({
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-display text-[15px] font-semibold text-white">{phrase.luganda}</span>
             {hasAudio && (
-              <span className="rounded-full bg-emerald/15 px-2 py-0.5 text-[10px] font-extrabold text-emerald">🎙 voice</span>
+              <span className="rounded-md bg-white/8 px-2 py-0.5 text-[10px] font-medium text-[#8b8b9e]">Audio</span>
             )}
             {phrase.custom && (
-              <span className="rounded-full bg-violet/15 px-2 py-0.5 text-[10px] font-extrabold text-violet">custom</span>
+              <span className="rounded-md bg-white/8 px-2 py-0.5 text-[10px] font-medium text-[#8b8b9e]">Custom</span>
             )}
           </div>
           <p className="mt-0.5 text-xs font-semibold text-[#5a5a72]">{phrase.english}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className={`rounded-xl border px-2.5 py-1.5 text-sm font-bold transition ${
-              expanded ? 'border-violet/40 bg-violet/15 text-violet' : 'border-white/8 bg-white/5 text-[#8b8b9e]'
+            className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+              expanded ? 'border-white/25 bg-white/10 text-white' : 'border-white/10 text-[#8b8b9e] hover:text-white'
             }`}
-            title="Record / play voice"
           >
-            🎙
+            {expanded ? 'Close' : 'Audio'}
           </button>
-          <button type="button" onClick={onEdit} className="rounded-xl border border-white/8 bg-white/5 px-2.5 py-1.5 text-sm" title="Edit">✏️</button>
+          <button type="button" onClick={onEdit} className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-medium text-[#8b8b9e] hover:text-white" title="Edit">Edit</button>
           {!isBuiltIn && (
-            <button type="button" onClick={onDelete} className="rounded-xl border border-rose/20 bg-rose/10 px-2.5 py-1.5 text-sm" title="Delete">🗑</button>
+            <button type="button" onClick={onDelete} className="rounded-lg border border-rose/20 px-2.5 py-1.5 text-xs font-medium text-rose hover:bg-rose/10" title="Delete">Del</button>
           )}
         </div>
       </div>
@@ -331,12 +327,12 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
   return (
     <div className="relative mx-auto flex min-h-dvh max-w-md flex-col bg-[#0e0e12] px-4 pb-10 pt-6">
       <header className="mb-5 flex items-center gap-3">
-        <button type="button" onClick={onClose} className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-[#8b8b9e]">← Back</button>
+        <Button variant="secondary" onClick={onClose} className="!w-auto shrink-0 px-4">Back</Button>
         <div className="flex-1">
-          <h1 className="font-display text-2xl font-semibold text-white">Admin</h1>
-          <p className="text-xs font-semibold text-[#5a5a72]">{phrases.length} phrases · tap 🎙 to record</p>
+          <h1 className="text-xl font-semibold text-white">Admin</h1>
+          <p className="text-xs text-[#6b6b80]">{phrases.length} phrases</p>
         </div>
-        <button type="button" onClick={() => setEditing('new')} className="rounded-2xl bg-violet px-4 py-2.5 text-sm font-bold text-white">+ Add</button>
+        <button type="button" onClick={() => setEditing('new')} className="shrink-0 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0e0e12]">Add</button>
       </header>
 
       <input
@@ -355,8 +351,10 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
               key={id}
               type="button"
               onClick={() => setFilter(id)}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-extrabold transition ${
-                filter === id ? 'bg-violet text-white' : 'border border-white/8 bg-white/5 text-[#8b8b9e]'
+              className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                filter === id
+                  ? 'bg-white text-[#0e0e12]'
+                  : 'border border-white/10 text-[#8b8b9e] hover:text-white'
               }`}
             >
               {cat ? `${cat.emoji} ${cat.name}` : 'All'}

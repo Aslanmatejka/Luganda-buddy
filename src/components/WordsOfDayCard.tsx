@@ -1,87 +1,46 @@
 import { useState } from 'react'
 import { useAudioUrl } from '../hooks/useAudioUrl'
 import { wordsOfDay } from '../services/lesson'
+import { Panel, SectionHeading } from './ui/Panel'
 import type { Phrase } from '../types'
 
-const ACCENTS = [
-  { border: 'border-violet/30', glow: 'bg-violet/8', tag: 'bg-violet/20 text-violet' },
-  { border: 'border-emerald/30', glow: 'bg-emerald/8', tag: 'bg-emerald/20 text-emerald' },
-  { border: 'border-coral/30', glow: 'bg-coral/8', tag: 'bg-coral/20 text-coral' },
-]
-
-function WordChip({
-  phrase,
-  accent,
-  delay,
-}: {
-  phrase: Phrase
-  accent: (typeof ACCENTS)[number]
-  delay: string
-}) {
-  const [flipped, setFlipped] = useState(false)
-  const [animating, setAnimating] = useState(false)
-  const flip = () => {
-    if (animating) return
-    setAnimating(true)
-    setTimeout(() => setFlipped((f) => !f), 180)
-    setTimeout(() => setAnimating(false), 370)
-  }
-
+function WordChip({ phrase }: { phrase: Phrase }) {
+  const [showEnglish, setShowEnglish] = useState(false)
   const { url: audioUrl } = useAudioUrl(phrase.id)
 
-  const speak = (e: React.MouseEvent) => {
-    e.stopPropagation()
+  const speak = () => {
     if (audioUrl) new Audio(audioUrl).play().catch(() => {})
   }
 
   return (
-    <div
-      className={`animate-slide-up group relative flex flex-1 flex-col items-center overflow-hidden rounded-[18px] border ${accent.border} bg-[#1e1e28] p-3.5 text-center`}
-      style={{ animationDelay: delay }}
-    >
-      {/* colour wash */}
-      <div className={`pointer-events-none absolute inset-0 ${accent.glow} opacity-60`} />
-
+    <div className="flex flex-1 flex-col rounded-xl border border-white/10 bg-[#1a1a24] p-3">
       <button
         type="button"
-        onClick={flip}
-        className="relative flex w-full flex-1 flex-col items-center transition-transform active:scale-[0.95]"
-        title="Tap to flip"
+        onClick={() => setShowEnglish((v) => !v)}
+        className="flex flex-1 flex-col items-center text-center"
       >
-        <div className={animating ? (flipped ? 'flip-enter' : 'flip-exit') : ''}>
-          {!flipped ? (
-            <>
-              <p className="font-display text-[16px] font-semibold leading-snug text-white">
-                {phrase.luganda}
-              </p>
-              <p className="mt-1 text-[10px] font-bold text-[#5a5a72]">
-                {phrase.pronunciation}
-              </p>
-              <p className="mt-2.5 text-[9px] font-extrabold uppercase tracking-widest text-[#5a5a72]">
-                tap
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-[14px] font-extrabold text-white">
-                {phrase.english}
-              </p>
-              <p className="mt-1.5 text-[10px] font-semibold leading-snug text-[#8b8b9e]">
-                {phrase.explanation.length > 55
-                  ? phrase.explanation.slice(0, 53) + '…'
-                  : phrase.explanation}
-              </p>
-            </>
-          )}
-        </div>
+        {!showEnglish ? (
+          <>
+            <p className="text-[15px] font-semibold leading-snug text-white">{phrase.luganda}</p>
+            <p className="mt-1 text-[11px] text-[#6b6b80]">{phrase.pronunciation}</p>
+            <p className="mt-2 text-[10px] font-medium text-[#5a5a72]">Tap for meaning</p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-medium text-white">{phrase.english}</p>
+            <p className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-[#8b8b9e]">
+              {phrase.explanation}
+            </p>
+          </>
+        )}
       </button>
-
       <button
         type="button"
         onClick={speak}
-        className={`relative mt-3 flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-extrabold ${accent.tag}`}
+        disabled={!audioUrl}
+        className="mt-3 w-full rounded-lg border border-white/10 py-2 text-xs font-semibold text-[#a1a1b5] transition-colors hover:bg-white/5 disabled:opacity-40"
       >
-        🔊 Hear
+        {audioUrl ? 'Listen' : 'No audio'}
       </button>
     </div>
   )
@@ -90,19 +49,13 @@ function WordChip({
 export function WordsOfDayCard() {
   const [a, b, c] = wordsOfDay()
   return (
-    <section className="rounded-[22px] bg-[#16161d] p-5 border border-white/5">
-      <div className="flex items-center gap-2.5 mb-4">
-        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber/15 text-base">🌟</span>
-        <div>
-          <p className="text-sm font-bold text-white">Words of the day</p>
-          <p className="text-[11px] font-semibold text-[#5a5a72]">Tap to reveal • New every day</p>
-        </div>
-      </div>
+    <Panel className="p-5">
+      <SectionHeading title="Words of the day" subtitle="Three phrases to explore today" />
       <div className="flex gap-2">
-        <WordChip phrase={a} accent={ACCENTS[0]!} delay="0ms" />
-        <WordChip phrase={b} accent={ACCENTS[1]!} delay="60ms" />
-        <WordChip phrase={c} accent={ACCENTS[2]!} delay="120ms" />
+        <WordChip phrase={a} />
+        <WordChip phrase={b} />
+        <WordChip phrase={c} />
       </div>
-    </section>
+    </Panel>
   )
 }

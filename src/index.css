@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-display: "Outfit", system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", system-ui, sans-serif;
   --font-sans:    "Plus Jakarta Sans", system-ui, sans-serif;
 
   /* ── Dark-mode base ── */
@@ -62,6 +62,15 @@ body {
 }
 
 button { font-family: inherit; touch-action: manipulation; cursor: pointer; }
+
+/* Readable labels — not buttons */
+.label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-dimmer);
+}
 
 /* ── Scrollbar ─────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; }
@@ -147,15 +156,9 @@ button { font-family: inherit; touch-action: manipulation; cursor: pointer; }
 /* ── Utility classes ───────────────────────────────────────────────────────── */
 
 .animate-float       { animation: float-y 4s ease-in-out infinite; }
-.animate-pop         { animation: pop-in 0.52s cubic-bezier(.22,.68,0,1.2) both; }
-.animate-slide-up    { animation: slide-up 0.38s ease-out both; }
-.animate-fade-in     { animation: fade-in 0.32s ease both; }
-.animate-pulse-glow  { animation: pulse-glow 2.4s ease-in-out infinite; }
-.animate-bounce-in   { animation: bounce-in 0.6s cubic-bezier(.22,.68,0,1.2) both; }
-.animate-confetti-a  { animation: confetti-a 1.5s ease-out infinite alternate; }
-.animate-confetti-b  { animation: confetti-b 1.25s ease-out 0.12s infinite alternate; }
-.animate-confetti-c  { animation: confetti-c 1.7s ease-out 0.28s infinite alternate; }
-.animate-streak      { animation: streak-glow 2.2s ease-in-out infinite; }
+.animate-pop         { animation: pop-in 0.4s ease-out both; }
+.animate-slide-up    { animation: slide-up 0.32s ease-out both; }
+.animate-fade-in     { animation: fade-in 0.28s ease both; }
 
 .bar { animation: speaking 0.6s ease-in-out infinite; }
 

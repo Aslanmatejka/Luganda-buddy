@@ -1,24 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAudioUrl } from '../hooks/useAudioUrl'
 
-function SoundWave({ speaking }: { speaking: boolean }) {
-  const bars = [6, 14, 10, 18, 8, 16, 6]
-  return (
-    <span className="flex h-6 items-end gap-[3px]" aria-hidden="true">
-      {bars.map((h, i) => (
-        <span
-          key={i}
-          className={`w-[3px] rounded-full transition-all ${speaking ? 'bar bg-white' : 'bg-white/40'}`}
-          style={{
-            height: speaking ? h : Math.max(3, h * 0.35),
-            animationDelay: `${i * 75}ms`,
-          }}
-        />
-      ))}
-    </span>
-  )
-}
-
 export function ListenButton({
   phraseId,
   autoPlay = false,
@@ -50,9 +32,11 @@ export function ListenButton({
 
   if (!audio) {
     return (
-      <div className="flex w-full items-center justify-center gap-3 rounded-2xl border border-white/6 px-5 py-4 text-[15px] font-bold text-[#3a3a50]">
-        <SoundWave speaking={false} />
-        <span>No recording yet</span>
+      <div
+        className="flex w-full items-center justify-center rounded-xl border border-dashed border-white/12 px-5 py-4 text-sm text-[#5a5a72]"
+        role="status"
+      >
+        No recording yet
       </div>
     )
   }
@@ -61,16 +45,14 @@ export function ListenButton({
     <button
       type="button"
       onClick={play}
-      className={`group flex w-full items-center justify-center gap-3 rounded-2xl px-5 py-4 text-[15px] font-bold transition active:scale-[0.97] ${
+      className={`flex w-full items-center justify-center gap-2 rounded-xl border px-5 py-4 text-[15px] font-semibold transition-colors active:scale-[0.98] ${
         speaking
-          ? 'bg-violet shadow-[0_0_28px_rgba(139,92,246,0.45)]'
-          : 'bg-white/8 border border-white/10 text-white hover:bg-white/12'
+          ? 'border-violet/40 bg-violet/15 text-violet'
+          : 'border-white/20 bg-white/5 text-white hover:bg-white/8'
       }`}
     >
-      <SoundWave speaking={speaking} />
-      <span className={speaking ? 'text-white' : 'text-[#8b8b9e]'}>
-        {speaking ? 'Playing…' : 'Listen'}
-      </span>
+      <span className="text-base" aria-hidden="true">{speaking ? '◼' : '▶'}</span>
+      {speaking ? 'Playing…' : 'Listen'}
     </button>
   )
 }

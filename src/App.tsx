@@ -15,10 +15,7 @@ import type { CategoryId, Phrase } from './types'
 
 function Shell({ children }: { children: ReactNode }) {
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-[#0e0e12]">
-      <div className="pointer-events-none absolute -top-32 -right-20 h-72 w-72 rounded-full bg-violet/10 blur-3xl" />
-      <div className="pointer-events-none absolute top-64 -left-24 h-60 w-60 rounded-full bg-coral/8 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-32 right-0 h-72 w-72 rounded-full bg-emerald/6 blur-3xl" />
+    <div className="relative min-h-dvh bg-[#0e0e12]">
       <div className="relative pb-[env(safe-area-inset-bottom)]">{children}</div>
     </div>
   )
@@ -147,10 +144,10 @@ export default function App() {
           <button
             type="button"
             onClick={() => navigate({ name: 'admin' })}
-            title="Admin — edit phrases & recordings"
-            className="fixed bottom-6 right-5 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-ink/80 text-lg text-cream shadow-lg backdrop-blur-sm transition active:scale-95"
+            title="Admin"
+            className="fixed bottom-6 right-5 z-40 flex h-11 w-11 items-center justify-center rounded-xl border border-white/15 bg-[#16161d] text-[#a1a1b5] shadow-lg transition-colors hover:bg-[#1e1e28] hover:text-white"
           >
-            ⚙️
+            ⚙
           </button>
         )}
 
