@@ -8,7 +8,6 @@ import {
   upsertCustomPhrase,
 } from '../services/customPhrases'
 import { idbLoadAudio, idbRemoveAudio, idbSaveAudio } from '../services/audioDB'
-import { speakLuganda } from '../services/speech'
 import type { CategoryId, Phrase } from '../types'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -316,14 +315,6 @@ function PhraseRow({
         <p className="mt-0.5 text-sm font-semibold text-muted">{phrase.english}</p>
       </div>
       <div className="flex shrink-0 gap-2">
-        <button
-          type="button"
-          title="Play TTS"
-          onClick={() => speakLuganda(phrase.luganda)}
-          className="rounded-xl bg-honey/40 px-2.5 py-1.5 text-sm font-bold text-ink"
-        >
-          🔊
-        </button>
         <button
           type="button"
           title="Edit"

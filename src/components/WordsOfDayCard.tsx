@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { wordsOfDay } from '../services/lesson'
-import { speakLuganda } from '../services/speech'
 import { idbLoadAudio } from '../services/audioDB'
 import type { Phrase } from '../types'
 
@@ -32,8 +31,7 @@ function WordChip({
     e.stopPropagation()
     idbLoadAudio(phrase.id).then((url) => {
       if (url) new Audio(url).play().catch(() => {})
-      else speakLuganda(phrase.luganda)
-    }).catch(() => speakLuganda(phrase.luganda))
+    }).catch(() => {})
   }
 
   return (

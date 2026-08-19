@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { isSpeechSupported, speakLuganda } from '../services/speech'
 import { idbLoadAudio } from '../services/audioDB'
 
 function SoundWave({ speaking }: { speaking: boolean }) {
@@ -21,36 +20,26 @@ function SoundWave({ speaking }: { speaking: boolean }) {
 }
 
 export function ListenButton({
-  text,
   phraseId,
-  audioDataUrl: propAudioUrl,
   autoPlay = false,
 }: {
-  text: string
-  phraseId?: string
-  /** Pass a pre-loaded data URL directly (optional — phraseId is preferred) */
-  audioDataUrl?: string
+  phraseId: string
   autoPlay?: boolean
 }) {
   const [speaking, setSpeaking] = useState(false)
-  const [resolvedAudio, setResolvedAudio] = useState<string | null>(propAudioUrl ?? null)
+  const [audio, setAudio] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const ttsOk = isSpeechSupported()
 
-  // Load audio from IndexedDB when phraseId is provided
   useEffect(() => {
-    if (!phraseId) { setResolvedAudio(propAudioUrl ?? null); return }
     idbLoadAudio(phraseId)
-      .then((url) => setResolvedAudio(url ?? propAudioUrl ?? null))
-      .catch(() => setResolvedAudio(propAudioUrl ?? null))
-  }, [phraseId, propAudioUrl])
+      .then(setAudio)
+      .catch(() => setAudio(null))
+  }, [phraseId])
 
-  const hasCustom = Boolean(resolvedAudio)
-
-  const playCustom = () => {
-    if (!resolvedAudio) return
+  const play = () => {
+    if (!audio) return
     audioRef.current?.pause()
-    const a = new Audio(resolvedAudio)
+    const a = new Audio(audio)
     audioRef.current = a
     setSpeaking(true)
     a.onended = () => setSpeaking(false)
@@ -58,28 +47,28 @@ export function ListenButton({
     a.play().catch(() => setSpeaking(false))
   }
 
-  const play = () => {
-    if (hasCustom) { playCustom(); return }
-    if (!ttsOk) return
-    setSpeaking(true)
-    speakLuganda(text, () => setSpeaking(false))
-  }
-
   useEffect(() => {
-    if (!autoPlay) return
+    if (!autoPlay || !audio) return
     const t = window.setTimeout(play, 500)
     return () => { clearTimeout(t); audioRef.current?.pause() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, resolvedAudio, autoPlay])
+  }, [audio, autoPlay])
 
-  const enabled = hasCustom || ttsOk
+  // No recording yet — show a dimmed placeholder
+  if (!audio) {
+    return (
+      <div className="flex w-full items-center justify-center gap-3 rounded-2xl border border-white/6 px-5 py-4 text-[15px] font-bold text-[#3a3a50]">
+        <SoundWave speaking={false} />
+        <span>No recording yet</span>
+      </div>
+    )
+  }
 
   return (
     <button
       type="button"
       onClick={play}
-      disabled={!enabled}
-      className={`group flex w-full items-center justify-center gap-3 rounded-2xl px-5 py-4 text-[15px] font-bold transition active:scale-[0.97] disabled:opacity-30 ${
+      className={`group flex w-full items-center justify-center gap-3 rounded-2xl px-5 py-4 text-[15px] font-bold transition active:scale-[0.97] ${
         speaking
           ? 'bg-violet shadow-[0_0_28px_rgba(139,92,246,0.45)]'
           : 'bg-white/8 border border-white/10 text-white hover:bg-white/12'
@@ -87,7 +76,7 @@ export function ListenButton({
     >
       <SoundWave speaking={speaking} />
       <span className={speaking ? 'text-white' : 'text-[#8b8b9e]'}>
-        {hasCustom ? "Aslan's voice" : speaking ? 'Listening…' : 'Listen'}
+        {speaking ? 'Playing…' : "Listen"}
       </span>
     </button>
   )

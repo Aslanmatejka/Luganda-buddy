@@ -1,13 +1,11 @@
 import type { Phrase } from '../types'
-import { speakLuganda } from '../services/speech'
 import { idbLoadAudio } from '../services/audioDB'
 
 export function ChallengeCard({ phrase }: { phrase: Phrase }) {
   const play = () => {
     idbLoadAudio(phrase.id).then((url) => {
       if (url) new Audio(url).play().catch(() => {})
-      else speakLuganda(phrase.luganda)
-    }).catch(() => speakLuganda(phrase.luganda))
+    }).catch(() => {})
   }
 
   return (

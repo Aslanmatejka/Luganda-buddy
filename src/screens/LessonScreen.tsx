@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ListenButton } from '../components/ListenButton'
 import { Mascot } from '../components/Mascot'
 import { getCategory } from '../data/content'
 import { buildLesson, quizChoices } from '../services/lesson'
-import { stopSpeech } from '../services/speech'
 import type { CategoryId, Phrase } from '../types'
 
 type Step = 'learn' | 'quiz' | 'feedback'
@@ -27,7 +26,6 @@ export function LessonScreen({
   const phrase = lesson[index]
   const choices = useMemo(() => (phrase ? quizChoices(phrase) : []), [phrase])
 
-  useEffect(() => { return () => stopSpeech() }, [])
 
   if (!phrase) return null
 
@@ -117,7 +115,7 @@ function LearnStep({ phrase, onContinue }: { phrase: Phrase; onContinue: () => v
         </span>
       </section>
 
-      <ListenButton text={phrase.luganda} phraseId={phrase.id} autoPlay />
+      <ListenButton phraseId={phrase.id} autoPlay />
 
       <p className="text-center text-xs font-semibold text-[#5a5a72]">
         Hear it · Whisper it · No pressure
@@ -151,7 +149,7 @@ function QuizStep({
       </div>
 
       <div className="mx-auto w-full">
-        <ListenButton text={phrase.luganda} phraseId={phrase.id} />
+        <ListenButton phraseId={phrase.id} />
       </div>
 
       <div className="flex flex-col gap-2.5">
@@ -205,7 +203,7 @@ function FeedbackStep({
         </p>
       </section>
 
-      <ListenButton text={phrase.luganda} phraseId={phrase.id} />
+      <ListenButton phraseId={phrase.id} />
 
       <button
         type="button"
