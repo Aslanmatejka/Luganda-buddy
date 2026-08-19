@@ -23,12 +23,10 @@ export function ListenButton({
   text,
   audioDataUrl,
   autoPlay = false,
-  variant = 'dark',
 }: {
   text: string
   audioDataUrl?: string
   autoPlay?: boolean
-  variant?: 'dark' | 'light'
 }) {
   const [speaking, setSpeaking] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
