@@ -16,6 +16,60 @@ function emptyDraft(categoryId: CategoryId = 'greetings'): Omit<Phrase, 'id'> {
   return { luganda: '', english: '', pronunciation: '', explanation: '', categoryId }
 }
 
+// ─── PreviewPlayer – plays any audio data URL ────────────────────────────────
+
+function PreviewPlayer({ dataUrl, label = '▶ Preview recording' }: { dataUrl: string; label?: string }) {
+  const [playing, setPlaying] = useState(false)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  const toggle = () => {
+    if (playing) {
+      audioRef.current?.pause()
+      setPlaying(false)
+      return
+    }
+    audioRef.current?.pause()
+    const a = new Audio(dataUrl)
+    audioRef.current = a
+    setPlaying(true)
+    a.onended = () => setPlaying(false)
+    a.onerror = () => setPlaying(false)
+    a.play().catch(() => setPlaying(false))
+  }
+
+  // Pause when unmounted
+  useEffect(() => () => { audioRef.current?.pause() }, [])
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      className={`flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-bold transition ${
+        playing
+          ? 'border-sky/40 bg-sky/15 text-sky'
+          : 'border-white/12 bg-white/5 text-[#c0c0d8]'
+      }`}
+    >
+      {playing ? (
+        <>
+          <span className="flex gap-[3px]">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="inline-block h-3.5 w-1 rounded-full bg-sky"
+                style={{ animation: `bounce 0.8s ${i * 0.15}s ease-in-out infinite alternate` }}
+              />
+            ))}
+          </span>
+          Playing… tap to pause
+        </>
+      ) : (
+        label
+      )}
+    </button>
+  )
+}
+
 // ─── Standalone recorder — lives outside the form so it survives re-renders ──
 
 function AudioRecorder({
@@ -27,10 +81,8 @@ function AudioRecorder({
   onAudioReady: (dataUrl: string) => void
 }) {
   const { state, dataUrl, start, stop, reset } = useAudioRecorder()
-  const [saved, setSaved]       = useState(false)
-  const [current, setCurrent]   = useState<string | null>(null)
-  const [playing, setPlaying]   = useState(false)
-  const audioRef                = useRef<HTMLAudioElement | null>(null)
+  const [saved, setSaved]     = useState(false)
+  const [current, setCurrent] = useState<string | null>(null)
 
   // Load existing recording for this phrase
   useEffect(() => {
@@ -56,21 +108,10 @@ function AudioRecorder({
   }
 
   const handleDelete = async () => {
-    audioRef.current?.pause()
     await idbRemoveAudio(phraseId)
     setCurrent(null)
     setSaved(false)
     reset()
-  }
-
-  const playStored = (url: string) => {
-    audioRef.current?.pause()
-    const a = new Audio(url)
-    audioRef.current = a
-    setPlaying(true)
-    a.onended = () => setPlaying(false)
-    a.onerror = () => setPlaying(false)
-    a.play().catch(() => setPlaying(false))
   }
 
   return (
@@ -78,15 +119,9 @@ function AudioRecorder({
       {/* Existing / just-saved recording */}
       {current && state === 'idle' && (
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={playing
-              ? () => { audioRef.current?.pause(); setPlaying(false) }
-              : () => playStored(current)}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald/15 border border-emerald/30 px-3 py-2 text-sm font-bold text-emerald"
-          >
-            {playing ? '⏸ Playing…' : '▶ Play recording'}
-          </button>
+          <div className="flex-1">
+            <PreviewPlayer dataUrl={current} label="▶ Play saved recording" />
+          </div>
           <button
             type="button"
             onClick={() => void handleDelete()}
@@ -129,9 +164,8 @@ function AudioRecorder({
       {/* Preview + save/discard */}
       {state === 'done' && dataUrl && (
         <div className="flex flex-col gap-2">
-          <p className="text-center text-xs font-semibold text-[#8b8b9e]">
-            Recording ready — save it below or discard
-          </p>
+          {/* Preview listen before saving */}
+          <PreviewPlayer dataUrl={dataUrl} />
           <div className="flex gap-2">
             <button
               type="button"
@@ -330,54 +364,88 @@ function PhraseRow({
   onEdit: () => void
   onDelete: () => void
 }) {
-  const isBuiltIn = builtInIds.has(phrase.id)
-  const [hasAudio, setHasAudio] = useState(false)
+  const isBuiltIn   = builtInIds.has(phrase.id)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [playing, setPlaying]   = useState(false)
+  const audioRef                = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
     idbLoadAudio(phrase.id)
-      .then((d) => setHasAudio(Boolean(d)))
+      .then((d) => setAudioUrl(d))
       .catch(() => {})
   }, [phrase.id])
 
+  const togglePlay = () => {
+    if (!audioUrl) return
+    if (playing) {
+      audioRef.current?.pause()
+      setPlaying(false)
+      return
+    }
+    audioRef.current?.pause()
+    const a = new Audio(audioUrl)
+    audioRef.current = a
+    setPlaying(true)
+    a.onended = () => setPlaying(false)
+    a.onerror = () => setPlaying(false)
+    a.play().catch(() => setPlaying(false))
+  }
+
   return (
-    <div className="flex items-start gap-3 rounded-2xl border border-white/6 bg-[#16161d] px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-display text-[15px] font-semibold text-white">
-            {phrase.luganda}
-          </span>
-          {hasAudio && (
-            <span className="rounded-full bg-emerald/15 px-2 py-0.5 text-[10px] font-extrabold text-emerald">
-              🎙 voice
+    <div className="rounded-2xl border border-white/6 bg-[#16161d] px-4 py-3">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-display text-[15px] font-semibold text-white">
+              {phrase.luganda}
             </span>
-          )}
-          {phrase.custom && (
-            <span className="rounded-full bg-violet/15 px-2 py-0.5 text-[10px] font-extrabold text-violet">
-              custom
-            </span>
-          )}
+            {audioUrl && (
+              <span className="rounded-full bg-emerald/15 px-2 py-0.5 text-[10px] font-extrabold text-emerald">
+                🎙 voice
+              </span>
+            )}
+            {phrase.custom && (
+              <span className="rounded-full bg-violet/15 px-2 py-0.5 text-[10px] font-extrabold text-violet">
+                custom
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs font-semibold text-[#5a5a72]">{phrase.english}</p>
         </div>
-        <p className="mt-0.5 text-xs font-semibold text-[#5a5a72]">{phrase.english}</p>
-      </div>
-      <div className="flex shrink-0 gap-2">
-        <button
-          type="button"
-          onClick={onEdit}
-          className="rounded-xl border border-white/8 bg-white/5 px-2.5 py-1.5 text-sm"
-          title="Edit"
-        >
-          ✏️
-        </button>
-        {!isBuiltIn && (
+        <div className="flex shrink-0 items-center gap-1.5">
+          {audioUrl && (
+            <button
+              type="button"
+              onClick={togglePlay}
+              title={playing ? 'Pause' : 'Play recording'}
+              className={`rounded-xl border px-2.5 py-1.5 text-sm font-bold transition ${
+                playing
+                  ? 'border-sky/40 bg-sky/15 text-sky'
+                  : 'border-emerald/30 bg-emerald/10 text-emerald'
+              }`}
+            >
+              {playing ? '⏸' : '▶'}
+            </button>
+          )}
           <button
             type="button"
-            onClick={onDelete}
-            className="rounded-xl border border-rose/20 bg-rose/10 px-2.5 py-1.5 text-sm"
-            title="Delete"
+            onClick={onEdit}
+            className="rounded-xl border border-white/8 bg-white/5 px-2.5 py-1.5 text-sm"
+            title="Edit"
           >
-            🗑
+            ✏️
           </button>
-        )}
+          {!isBuiltIn && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="rounded-xl border border-rose/20 bg-rose/10 px-2.5 py-1.5 text-sm"
+              title="Delete"
+            >
+              🗑
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -12,11 +12,25 @@ export function useAudioRecorder() {
     setDataUrl(null)
     chunksRef.current = []
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      // Prefer a widely-supported codec
-      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg', '']
-        .find((m) => m === '' || MediaRecorder.isTypeSupported(m)) ?? ''
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 48000,
+          channelCount: 1,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      })
+      // Prefer Opus at highest quality, fall back gracefully
+      const mimeType = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/ogg',
+        '',
+      ].find((m) => m === '' || MediaRecorder.isTypeSupported(m)) ?? ''
+      const options: MediaRecorderOptions = mimeType ? { mimeType, audioBitsPerSecond: 128_000 } : {}
+      const recorder = new MediaRecorder(stream, options)
       mediaRef.current = recorder
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data)
