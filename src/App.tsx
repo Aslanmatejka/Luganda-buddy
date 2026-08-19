@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AdminClaimModal } from './components/AdminClaimModal'
 import { useProgress } from './hooks/useProgress'
 import { useAdminAccess } from './hooks/useAdminAccess'
+import { useScreen } from './hooks/useScreen'
 import { AdminScreen } from './screens/AdminScreen'
 import { CompleteScreen } from './screens/CompleteScreen'
 import { HomeScreen } from './screens/HomeScreen'
@@ -10,7 +11,7 @@ import { getCategory } from './data/content'
 import { fetchRemoteAudio, fetchRemoteCustomPhrases, migrateAudioFromLS } from './services/customPhrases'
 import { nextCategoryId } from './services/lesson'
 import { warmUpSpeech } from './services/speech'
-import type { CategoryId, Phrase, Screen } from './types'
+import type { CategoryId, Phrase } from './types'
 
 function Shell({ children }: { children: ReactNode }) {
   return (
@@ -23,10 +24,6 @@ function Shell({ children }: { children: ReactNode }) {
   )
 }
 
-/**
- * Invisible tap zone (bottom-right corner).
- * Tap 5 times quickly to open the claim modal.
- */
 function AdminEntryZone({ onActivate }: { onActivate: () => void }) {
   const tapsRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -39,7 +36,6 @@ function AdminEntryZone({ onActivate }: { onActivate: () => void }) {
       onActivate()
       return
     }
-    // Reset tap count if no more taps within 1.5 s
     timerRef.current = setTimeout(() => { tapsRef.current = 0 }, 1500)
   }
 
@@ -55,11 +51,10 @@ function AdminEntryZone({ onActivate }: { onActivate: () => void }) {
 export default function App() {
   const { progress, completeLesson } = useProgress()
   const { isAdmin, isChecking, signIn } = useAdminAccess()
-  const [screen, setScreen] = useState<Screen>({ name: 'home' })
+  const { screen, navigate } = useScreen()
   const [showClaim, setShowClaim] = useState(false)
 
   useEffect(() => {
-    // Defer sync so the UI paints first — heavy storage work won't block opening
     const run = () => {
       warmUpSpeech()
       void fetchRemoteCustomPhrases()
@@ -70,15 +65,22 @@ export default function App() {
     return () => window.clearTimeout(t)
   }, [])
 
+  // If URL is #/admin but user isn't admin, send them home
+  useEffect(() => {
+    if (screen.name === 'admin' && !isChecking && !isAdmin) {
+      navigate({ name: 'home' }, true)
+    }
+  }, [screen.name, isChecking, isAdmin, navigate])
+
   const startLesson = (categoryId?: CategoryId) => {
-    setScreen({ name: 'lesson', categoryId })
+    navigate({ name: 'lesson', categoryId })
   }
 
   const finishLesson = (lessonPhrases: Phrase[], categoryId: CategoryId) => {
     const before = new Set(progress.learnedIds)
     const newlyLearned = lessonPhrases.filter((p) => !before.has(p.id)).length
     completeLesson(lessonPhrases.map((p) => p.id))
-    setScreen({
+    navigate({
       name: 'complete',
       practiced: lessonPhrases.length,
       newlyLearned,
@@ -88,9 +90,20 @@ export default function App() {
   }
 
   if (screen.name === 'admin') {
+    if (isChecking) {
+      return (
+        <Shell>
+          <div className="flex min-h-dvh items-center justify-center text-sm font-semibold text-[#8b8b9e]">
+            Loading admin…
+          </div>
+        </Shell>
+      )
+    }
+    if (!isAdmin) return null
+
     return (
       <Shell>
-        <AdminScreen onClose={() => setScreen({ name: 'home' })} />
+        <AdminScreen onClose={() => navigate({ name: 'home' })} />
       </Shell>
     )
   }
@@ -102,7 +115,7 @@ export default function App() {
         <LessonScreen
           categoryId={categoryId}
           learnedIds={progress.learnedIds}
-          onExit={() => setScreen({ name: 'home' })}
+          onExit={() => navigate({ name: 'home' })}
           onFinish={(lessonPhrases) => finishLesson(lessonPhrases, categoryId)}
         />
       </Shell>
@@ -116,9 +129,9 @@ export default function App() {
           practiced={screen.practiced}
           newlyLearned={screen.newlyLearned}
           categoryName={screen.categoryName}
-          onHome={() => setScreen({ name: 'home' })}
+          onHome={() => navigate({ name: 'home' })}
           onAgain={() =>
-            setScreen({ name: 'lesson', categoryId: nextCategoryId(screen.categoryId) })
+            navigate({ name: 'lesson', categoryId: nextCategoryId(screen.categoryId) })
           }
         />
       </Shell>
@@ -130,11 +143,10 @@ export default function App() {
       <div className="relative">
         <HomeScreen progress={progress} onStart={startLesson} />
 
-        {/* Visible admin button — only shown when access is confirmed */}
         {isAdmin && (
           <button
             type="button"
-            onClick={() => setScreen({ name: 'admin' })}
+            onClick={() => navigate({ name: 'admin' })}
             title="Admin — edit phrases & recordings"
             className="fixed bottom-6 right-5 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-ink/80 text-lg text-cream shadow-lg backdrop-blur-sm transition active:scale-95"
           >
@@ -142,12 +154,10 @@ export default function App() {
           </button>
         )}
 
-        {/* Hidden long-press zone for first-time claim (only visible while not yet admin & not checking) */}
         {!isAdmin && !isChecking && (
           <AdminEntryZone onActivate={() => setShowClaim(true)} />
         )}
 
-        {/* Claim modal */}
         {showClaim && !isAdmin && (
           <AdminClaimModal
             onSignIn={signIn}
