@@ -1,11 +1,11 @@
+import { useAudioUrl } from '../hooks/useAudioUrl'
 import type { Phrase } from '../types'
-import { idbLoadAudio } from '../services/audioDB'
 
 export function ChallengeCard({ phrase }: { phrase: Phrase }) {
+  const { url: audioUrl } = useAudioUrl(phrase.id)
+
   const play = () => {
-    idbLoadAudio(phrase.id).then((url) => {
-      if (url) new Audio(url).play().catch(() => {})
-    }).catch(() => {})
+    if (audioUrl) new Audio(audioUrl).play().catch(() => {})
   }
 
   return (

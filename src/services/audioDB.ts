@@ -100,6 +100,21 @@ export function hasAudioIndexed(phraseId: string): boolean {
   return readIndex().has(phraseId)
 }
 
+// ── change notifications ──────────────────────────────────────────────────────
+// Components subscribe to reload audio instantly after admin saves.
+
+type AudioListener = (phraseId: string) => void
+const listeners = new Set<AudioListener>()
+
+export function onAudioChange(fn: AudioListener): () => void {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
+
+function notifyAudioChange(phraseId: string): void {
+  listeners.forEach((fn) => fn(phraseId))
+}
+
 // ── convert legacy string → Blob ─────────────────────────────────────────────
 
 function toBlob(value: StoredAudio): Blob {
@@ -138,11 +153,13 @@ export async function idbSaveAudio(phraseId: string, source: Blob | string): Pro
   if (!check) throw new Error('Save verification failed — storage may be blocked')
 
   indexAdd(phraseId)
+  notifyAudioChange(phraseId)
 }
 
 export async function idbRemoveAudio(phraseId: string): Promise<void> {
   await runTx<undefined>('readwrite', (s) => s.delete(phraseId))
   indexRemove(phraseId)
+  notifyAudioChange(phraseId)
 }
 
 export async function idbLoadAllAudio(): Promise<Record<string, Blob>> {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
+import { useAudioUrl } from '../hooks/useAudioUrl'
 import { wordsOfDay } from '../services/lesson'
-import { idbLoadAudio } from '../services/audioDB'
 import type { Phrase } from '../types'
 
 const ACCENTS = [
@@ -27,11 +27,11 @@ function WordChip({
     setTimeout(() => setAnimating(false), 370)
   }
 
+  const { url: audioUrl } = useAudioUrl(phrase.id)
+
   const speak = (e: React.MouseEvent) => {
     e.stopPropagation()
-    idbLoadAudio(phrase.id).then((url) => {
-      if (url) new Audio(url).play().catch(() => {})
-    }).catch(() => {})
+    if (audioUrl) new Audio(audioUrl).play().catch(() => {})
   }
 
   return (

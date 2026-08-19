@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { idbLoadAudio } from '../services/audioDB'
+import { useAudioUrl } from '../hooks/useAudioUrl'
 
 function SoundWave({ speaking }: { speaking: boolean }) {
   const bars = [6, 14, 10, 18, 8, 16, 6]
@@ -27,14 +27,8 @@ export function ListenButton({
   autoPlay?: boolean
 }) {
   const [speaking, setSpeaking] = useState(false)
-  const [audio, setAudio] = useState<string | null>(null)
+  const { url: audio } = useAudioUrl(phraseId)
   const audioRef = useRef<HTMLAudioElement | null>(null)
-
-  useEffect(() => {
-    idbLoadAudio(phraseId)
-      .then(setAudio)
-      .catch(() => setAudio(null))
-  }, [phraseId])
 
   const play = () => {
     if (!audio) return
@@ -54,7 +48,6 @@ export function ListenButton({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audio, autoPlay])
 
-  // No recording yet — show a dimmed placeholder
   if (!audio) {
     return (
       <div className="flex w-full items-center justify-center gap-3 rounded-2xl border border-white/6 px-5 py-4 text-[15px] font-bold text-[#3a3a50]">
@@ -76,7 +69,7 @@ export function ListenButton({
     >
       <SoundWave speaking={speaking} />
       <span className={speaking ? 'text-white' : 'text-[#8b8b9e]'}>
-        {speaking ? 'Playing…' : "Listen"}
+        {speaking ? 'Playing…' : 'Listen'}
       </span>
     </button>
   )

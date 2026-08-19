@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { categories, phrases as builtInPhrases } from '../data/content'
 import { useAudioRecorder } from '../hooks/useAudioRecorder'
+import { useAudioUrl } from '../hooks/useAudioUrl'
 import {
   allPhrases,
   deleteCustomPhrase,
@@ -9,7 +10,6 @@ import {
   saveAudio,
   upsertCustomPhrase,
 } from '../services/customPhrases'
-import { hasAudioIndexed, idbLoadAudio } from '../services/audioDB'
 import type { CategoryId, Phrase } from '../types'
 
 const builtInIds = new Set(builtInPhrases.map((p) => p.id))
@@ -58,36 +58,13 @@ function PlayButton({ url, label = '▶' }: { url: string; label?: string }) {
 
 // ─── PhraseAudioControls — inline record + play for one phrase ───────────────
 
-function PhraseAudioControls({
-  phraseId,
-  onSaved,
-}: {
-  phraseId: string
-  onSaved: () => void
-}) {
+function PhraseAudioControls({ phraseId }: { phraseId: string }) {
   const { state, blob, previewUrl, errorMsg, start, stop, reset } = useAudioRecorder()
-  const [savedUrl, setSavedUrl] = useState<string | null>(null)
-  const [hasVoice, setHasVoice] = useState(() => hasAudioIndexed(phraseId))
+  const { url: savedUrl, hasAudio, reload } = useAudioUrl(phraseId)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [secs, setSecs] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  // Load saved audio on mount
-  useEffect(() => {
-    let revoked: string | null = null
-    idbLoadAudio(phraseId).then((url) => {
-      if (url) {
-        revoked = url
-        setSavedUrl(url)
-        setHasVoice(true)
-      } else {
-        setSavedUrl(null)
-        setHasVoice(hasAudioIndexed(phraseId))
-      }
-    })
-    return () => { if (revoked) URL.revokeObjectURL(revoked) }
-  }, [phraseId])
 
   // Recording timer
   useEffect(() => {
@@ -108,13 +85,8 @@ function PhraseAudioControls({
     setSaveError(null)
     try {
       await saveAudio(phraseId, blob)
-      // Reload to get fresh object URL
-      const url = await idbLoadAudio(phraseId)
-      if (!url) throw new Error('Save failed — please try again')
-      setSavedUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return url })
-      setHasVoice(true)
       reset()
-      onSaved()
+      await reload()
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Save failed')
     } finally {
@@ -124,19 +96,17 @@ function PhraseAudioControls({
 
   const handleDelete = async () => {
     await removeAudio(phraseId)
-    setSavedUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null })
-    setHasVoice(false)
     reset()
-    onSaved()
+    await reload()
   }
 
   return (
     <div className="mt-2 flex flex-col gap-1.5 border-t border-white/6 pt-2">
       {/* Saved recording */}
-      {hasVoice && savedUrl && state !== 'done' && (
+      {hasAudio && savedUrl && state !== 'done' && (
         <div className="flex items-center gap-1.5">
           <PlayButton url={savedUrl} label="▶ Play" />
-          <span className="flex-1 text-[10px] font-bold text-emerald">Voice saved</span>
+          <span className="flex-1 text-[10px] font-bold text-emerald">Voice saved ✓</span>
           <button
             type="button"
             onClick={() => void handleDelete()}
@@ -191,7 +161,7 @@ function PhraseAudioControls({
           onClick={start}
           className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-violet/25 bg-violet/10 py-2 text-xs font-bold text-violet"
         >
-          🎙 {hasVoice ? 'Re-record' : 'Record voice'}
+          🎙 {hasAudio ? 'Re-record' : 'Record voice'}
         </button>
       )}
 
@@ -293,17 +263,14 @@ function PhraseRow({
   phrase,
   onEdit,
   onDelete,
-  refreshKey,
-  onAudioChange,
 }: {
   phrase: Phrase
   onEdit: () => void
   onDelete: () => void
-  refreshKey: number
-  onAudioChange: () => void
 }) {
   const isBuiltIn = builtInIds.has(phrase.id)
   const [expanded, setExpanded] = useState(false)
+  const { hasAudio } = useAudioUrl(phrase.id)
 
   return (
     <div className="rounded-2xl border border-white/6 bg-[#16161d] px-4 py-3">
@@ -311,7 +278,7 @@ function PhraseRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-display text-[15px] font-semibold text-white">{phrase.luganda}</span>
-            {hasAudioIndexed(phrase.id) && (
+            {hasAudio && (
               <span className="rounded-full bg-emerald/15 px-2 py-0.5 text-[10px] font-extrabold text-emerald">🎙 voice</span>
             )}
             {phrase.custom && (
@@ -339,11 +306,7 @@ function PhraseRow({
       </div>
 
       {expanded && (
-        <PhraseAudioControls
-          key={`${phrase.id}-${refreshKey}`}
-          phraseId={phrase.id}
-          onSaved={onAudioChange}
-        />
+        <PhraseAudioControls phraseId={phrase.id} />
       )}
     </div>
   )
@@ -356,12 +319,8 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
   const [filter, setFilter] = useState<CategoryId | 'all'>('all')
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<Phrase | null | 'new'>(null)
-  const [refreshKey, setRefreshKey] = useState(0)
 
-  const refresh = useCallback(() => {
-    setPhrases(allPhrases())
-    setRefreshKey((k) => k + 1)
-  }, [])
+  const refresh = useCallback(() => setPhrases(allPhrases()), [])
 
   const visible = phrases.filter((p) => {
     const catOk = filter === 'all' || p.categoryId === filter
@@ -414,9 +373,7 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
           <PhraseRow
             key={phrase.id}
             phrase={phrase}
-            refreshKey={refreshKey}
             onEdit={() => setEditing(phrase)}
-            onAudioChange={refresh}
             onDelete={() => {
               if (confirm(`Delete "${phrase.luganda}"?`)) {
                 deleteCustomPhrase(phrase.id)
