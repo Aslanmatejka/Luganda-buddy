@@ -4,6 +4,7 @@ import { useAudioRecorder } from '../hooks/useAudioRecorder'
 import { useAudioUrl } from '../hooks/useAudioUrl'
 import {
   allPhrases,
+  countCloudAudio,
   deleteCustomPhrase,
   newPhraseId,
   removeAudio,
@@ -60,7 +61,13 @@ function PlayButton({ url, label = '▶' }: { url: string; label?: string }) {
 
 // ─── PhraseAudioControls — inline record + play for one phrase ───────────────
 
-function PhraseAudioControls({ phraseId }: { phraseId: string }) {
+function PhraseAudioControls({
+  phraseId,
+  onCloudSaved,
+}: {
+  phraseId: string
+  onCloudSaved?: () => void
+}) {
   const { state, blob, previewUrl, errorMsg, start, stop, reset } = useAudioRecorder()
   const { url: savedUrl, hasAudio, reload } = useAudioUrl(phraseId)
   const [saving, setSaving] = useState(false)
@@ -90,8 +97,9 @@ function PhraseAudioControls({ phraseId }: { phraseId: string }) {
       reset()
       await reload()
       setSaveError(null)
-      // brief success via existing "Saved" label after reload
+      onCloudSaved?.()
     } catch (err) {
+      // Keep local preview; show exact cloud/DB failure
       setSaveError(err instanceof Error ? err.message : 'Save failed')
     } finally {
       setSaving(false)
@@ -110,7 +118,7 @@ function PhraseAudioControls({ phraseId }: { phraseId: string }) {
       {hasAudio && savedUrl && state !== 'done' && (
         <div className="flex items-center gap-2">
           <PlayButton url={savedUrl} label="Play" />
-          <span className="flex-1 text-xs font-medium text-emerald">Saved & shared</span>
+          <span className="flex-1 text-xs font-medium text-emerald">In database ✓</span>
           <button
             type="button"
             onClick={() => void handleDelete()}
@@ -263,10 +271,12 @@ function PhraseRow({
   phrase,
   onEdit,
   onDelete,
+  onCloudSaved,
 }: {
   phrase: Phrase
   onEdit: () => void
   onDelete: () => void
+  onCloudSaved?: () => void
 }) {
   const isBuiltIn = builtInIds.has(phrase.id)
   const [expanded, setExpanded] = useState(false)
@@ -305,7 +315,7 @@ function PhraseRow({
       </div>
 
       {expanded && (
-        <PhraseAudioControls phraseId={phrase.id} />
+        <PhraseAudioControls phraseId={phrase.id} onCloudSaved={onCloudSaved} />
       )}
     </div>
   )
@@ -320,20 +330,31 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
   const [editing, setEditing] = useState<Phrase | null | 'new'>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const [cloudCount, setCloudCount] = useState<number | null>(null)
 
   const refresh = useCallback(() => setPhrases(allPhrases()), [])
+
+  const refreshCloudCount = useCallback(async () => {
+    const n = await countCloudAudio()
+    setCloudCount(n)
+  }, [])
+
+  useEffect(() => {
+    void refreshCloudCount()
+  }, [refreshCloudCount])
 
   const handleSyncCloud = async () => {
     setSyncing(true)
     setSyncMsg(null)
     try {
       const { ok, failed } = await syncAllLocalAudioToCloud()
+      await refreshCloudCount()
       setSyncMsg(
         failed > 0
-          ? `Shared ${ok} voices. ${failed} failed — try again.`
+          ? `Uploaded ${ok} to database. ${failed} failed — try again.`
           : ok === 0
-            ? 'No local voices found to share. Record some first.'
-            : `Shared ${ok} voices with everyone. ✓`,
+            ? 'No local voices found. Record some first, then they will upload automatically.'
+            : `Uploaded ${ok} voices to the database. ✓`,
       )
     } catch (err) {
       setSyncMsg(err instanceof Error ? err.message : 'Sync failed')
@@ -359,12 +380,12 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
         <button type="button" onClick={() => setEditing('new')} className="shrink-0 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0e0e12]">Add</button>
       </header>
 
-      <div className="mb-4 rounded-xl border border-amber/25 bg-amber/5 p-3">
-        <p className="text-xs font-semibold text-amber">
-          Previous voices were lost in an update (they were only on this phone, never in the cloud).
+      <div className="mb-4 rounded-xl border border-white/10 bg-[#16161d] p-3">
+        <p className="text-xs font-semibold text-white">
+          Database voices: {cloudCount === null ? '…' : cloudCount}
         </p>
         <p className="mt-1 text-xs text-[#8b8b9e]">
-          Please re-record. Each new save is uploaded to the cloud so everyone with the link can hear it.
+          Every Save uploads the file and writes a database row. Other people only hear voices that are in the database.
         </p>
         <button
           type="button"
@@ -372,7 +393,14 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
           disabled={syncing}
           className="mt-2 w-full rounded-lg border border-white/15 py-2.5 text-sm font-semibold text-white hover:bg-white/5 disabled:opacity-50"
         >
-          {syncing ? 'Sharing voices…' : 'Share all voices with everyone'}
+          {syncing ? 'Uploading to database…' : 'Upload all local voices to database'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void refreshCloudCount()}
+          className="mt-2 w-full rounded-lg border border-white/10 py-2 text-xs font-medium text-[#8b8b9e] hover:text-white"
+        >
+          Refresh database count
         </button>
         {syncMsg && (
           <p className="mt-2 text-xs text-[#a1a1b5]">{syncMsg}</p>
@@ -416,6 +444,7 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
             key={phrase.id}
             phrase={phrase}
             onEdit={() => setEditing(phrase)}
+            onCloudSaved={() => void refreshCloudCount()}
             onDelete={() => {
               if (confirm(`Delete "${phrase.luganda}"?`)) {
                 deleteCustomPhrase(phrase.id)

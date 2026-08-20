@@ -143,9 +143,14 @@ function publicUrlFor(path: string): string {
   return `${data.publicUrl}?t=${Date.now()}`
 }
 
+function cleanPublicUrl(path: string): string {
+  if (!supabase) return ''
+  return supabase.storage.from(AUDIO_BUCKET).getPublicUrl(path).data.publicUrl
+}
+
 /**
- * Save locally AND upload to shared cloud storage so every visitor can hear it.
- * Throws if the cloud upload fails (admin must know).
+ * Save locally AND upload to shared cloud storage + database row.
+ * Throws unless the database row is confirmed.
  */
 export async function saveAudio(phraseId: string, source: Blob | string): Promise<void> {
   const blob =
@@ -156,6 +161,11 @@ export async function saveAudio(phraseId: string, source: Blob | string): Promis
           return res.blob()
         })()
 
+  if (blob.size < 200) {
+    throw new Error('Recording is empty or too short — please record again')
+  }
+
+  // 1) Always keep a local copy first
   await idbSaveAudio(phraseId, blob)
 
   if (!supabase) {
@@ -163,8 +173,10 @@ export async function saveAudio(phraseId: string, source: Blob | string): Promis
   }
 
   const path = `${phraseId}.${extForBlob(blob)}`
+  const mime = blob.type || 'audio/webm'
+  const publicUrl = cleanPublicUrl(path)
 
-  // Remove any previous extension variants, then upload fresh
+  // 2) Replace any previous files for this phrase
   await supabase.storage.from(AUDIO_BUCKET).remove([
     `${phraseId}.webm`,
     `${phraseId}.mp4`,
@@ -172,27 +184,40 @@ export async function saveAudio(phraseId: string, source: Blob | string): Promis
     `${phraseId}.mp3`,
   ])
 
+  // 3) Upload bytes to Storage
   const { error: upErr } = await supabase.storage.from(AUDIO_BUCKET).upload(path, blob, {
     upsert: true,
-    contentType: blob.type || 'audio/webm',
+    contentType: mime,
     cacheControl: '3600',
   })
   if (upErr) throw new Error(`Cloud upload failed: ${upErr.message}`)
 
-  const { error: dbErr } = await supabase.from('phrase_audio').upsert(
-    { phrase_id: phraseId, storage_path: path, updated_at: new Date().toISOString() },
-    { onConflict: 'phrase_id' },
-  )
-  if (dbErr) throw new Error(`Cloud save failed: ${dbErr.message}`)
+  // 4) Write / update the database row (this is what other devices look up)
+  const row = {
+    phrase_id: phraseId,
+    storage_path: path,
+    public_url: publicUrl,
+    byte_size: blob.size,
+    mime_type: mime,
+    updated_at: new Date().toISOString(),
+  }
+  const { error: dbErr } = await supabase
+    .from('phrase_audio')
+    .upsert(row, { onConflict: 'phrase_id' })
+  if (dbErr) throw new Error(`Database save failed: ${dbErr.message}`)
 
-  // Verify the public file is reachable
-  const url = publicUrlFor(path)
-  const probe = await fetch(url, { method: 'HEAD' }).catch(() => null)
-  if (probe && !probe.ok) {
-    throw new Error('Upload finished but file is not publicly readable yet — try again')
+  // 5) Verify the row actually exists in the database
+  const { data: verified, error: verifyErr } = await supabase
+    .from('phrase_audio')
+    .select('phrase_id, storage_path, public_url')
+    .eq('phrase_id', phraseId)
+    .maybeSingle()
+
+  if (verifyErr || !verified?.storage_path) {
+    throw new Error('Saved locally but database verification failed — try Save again')
   }
 
-  setRemoteAudioUrl(phraseId, url)
+  setRemoteAudioUrl(phraseId, publicUrlFor(path))
 }
 
 export async function removeAudio(phraseId: string): Promise<void> {
@@ -201,7 +226,6 @@ export async function removeAudio(phraseId: string): Promise<void> {
 
   if (!supabase) return
 
-  // Remove known extensions
   await supabase.storage.from(AUDIO_BUCKET).remove([
     `${phraseId}.webm`,
     `${phraseId}.mp4`,
@@ -215,20 +239,37 @@ export async function loadAudio(phraseId: string): Promise<string | null> {
   return idbLoadAudio(phraseId)
 }
 
+/** How many shared voices are currently in the database. */
+export async function countCloudAudio(): Promise<number> {
+  if (!supabase) return 0
+  const { count, error } = await supabase
+    .from('phrase_audio')
+    .select('phrase_id', { count: 'exact', head: true })
+  if (error) return 0
+  return count ?? 0
+}
+
 /** Pull shared recordings for EVERY visitor (not filtered by device). */
 export async function fetchRemoteAudio(): Promise<void> {
   if (!supabase) return
   try {
     const { data, error } = await supabase
       .from('phrase_audio')
-      .select('phrase_id, storage_path')
+      .select('phrase_id, storage_path, public_url')
     if (error || !data) return
 
     const map: Record<string, string> = {}
-    for (const row of data as { phrase_id: string; storage_path: string }[]) {
-      if (!row.phrase_id || !row.storage_path) continue
-      const { data: pub } = supabase.storage.from(AUDIO_BUCKET).getPublicUrl(row.storage_path)
-      map[row.phrase_id] = pub.publicUrl
+    for (const row of data as {
+      phrase_id: string
+      storage_path: string
+      public_url: string | null
+    }[]) {
+      if (!row.phrase_id) continue
+      if (row.public_url) {
+        map[row.phrase_id] = row.public_url
+      } else if (row.storage_path) {
+        map[row.phrase_id] = cleanPublicUrl(row.storage_path)
+      }
     }
     setRemoteAudioUrls(map)
   } catch {
