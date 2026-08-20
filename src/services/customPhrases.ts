@@ -125,69 +125,118 @@ export function allPhrases(): Phrase[] {
 // Audio recordings are stored in IndexedDB (no size limit).
 // The old localStorage audio key is intentionally left alone for migration below.
 
-import { idbLoadAudio, idbLoadAllAudio, idbRemoveAudio, idbSaveAudio } from './audioDB'
+import { idbLoadAudio, idbLoadAllAudio, idbRemoveAudio, idbSaveAudio, setRemoteAudioUrl, setRemoteAudioUrls } from './audioDB'
 
-/** Convert Blob → base64 data URL for Supabase sync */
-async function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onloadend = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(blob)
-  })
+const AUDIO_BUCKET = 'phrase-audio'
+
+function extForBlob(blob: Blob): string {
+  if (blob.type.includes('mp4')) return 'mp4'
+  if (blob.type.includes('ogg')) return 'ogg'
+  if (blob.type.includes('mpeg') || blob.type.includes('mp3')) return 'mp3'
+  return 'webm'
 }
 
-export async function saveAudio(phraseId: string, source: Blob | string): Promise<void> {
-  await idbSaveAudio(phraseId, source)
+function publicUrlFor(path: string): string {
+  if (!supabase) return ''
+  const { data } = supabase.storage.from(AUDIO_BUCKET).getPublicUrl(path)
+  // Cache-bust so updated recordings replace immediately
+  return `${data.publicUrl}?t=${Date.now()}`
+}
 
-  if (supabase) {
-    const dataUrl = source instanceof Blob ? await blobToDataUrl(source) : source
-    void Promise.resolve(
-      supabase.from('audio_recordings').upsert(
-        { phrase_id: phraseId, device_id: getDeviceId(), data_url: dataUrl, updated_at: new Date().toISOString() },
-        { onConflict: 'phrase_id,device_id' },
-      ),
-    ).catch(() => {})
+/**
+ * Save locally AND upload to shared cloud storage so every visitor can hear it.
+ * Throws if the cloud upload fails (admin must know).
+ */
+export async function saveAudio(phraseId: string, source: Blob | string): Promise<void> {
+  const blob =
+    source instanceof Blob
+      ? source
+      : await (async () => {
+          const res = await fetch(source)
+          return res.blob()
+        })()
+
+  await idbSaveAudio(phraseId, blob)
+
+  if (!supabase) {
+    throw new Error('Cloud sync unavailable — recording saved only on this device')
   }
+
+  const path = `${phraseId}.${extForBlob(blob)}`
+  const { error: upErr } = await supabase.storage.from(AUDIO_BUCKET).upload(path, blob, {
+    upsert: true,
+    contentType: blob.type || 'audio/webm',
+    cacheControl: '3600',
+  })
+  if (upErr) throw new Error(`Cloud upload failed: ${upErr.message}`)
+
+  const { error: dbErr } = await supabase.from('phrase_audio').upsert(
+    { phrase_id: phraseId, storage_path: path, updated_at: new Date().toISOString() },
+    { onConflict: 'phrase_id' },
+  )
+  if (dbErr) throw new Error(`Cloud save failed: ${dbErr.message}`)
+
+  setRemoteAudioUrl(phraseId, publicUrlFor(path))
 }
 
 export async function removeAudio(phraseId: string): Promise<void> {
   await idbRemoveAudio(phraseId)
+  setRemoteAudioUrl(phraseId, null)
 
-  if (supabase) {
-    void Promise.resolve(
-      supabase
-        .from('audio_recordings')
-        .delete()
-        .eq('phrase_id', phraseId)
-        .eq('device_id', getDeviceId()),
-    ).catch(() => {})
-  }
+  if (!supabase) return
+
+  // Remove known extensions
+  await supabase.storage.from(AUDIO_BUCKET).remove([
+    `${phraseId}.webm`,
+    `${phraseId}.mp4`,
+    `${phraseId}.ogg`,
+    `${phraseId}.mp3`,
+  ])
+  await supabase.from('phrase_audio').delete().eq('phrase_id', phraseId)
 }
 
 export async function loadAudio(phraseId: string): Promise<string | null> {
   return idbLoadAudio(phraseId)
 }
 
-/** Pull audio recordings from Supabase and store in IndexedDB. */
+/** Pull shared recordings for EVERY visitor (not filtered by device). */
 export async function fetchRemoteAudio(): Promise<void> {
   if (!supabase) return
   try {
     const { data, error } = await supabase
-      .from('audio_recordings')
-      .select('phrase_id, data_url')
-      .eq('device_id', getDeviceId())
+      .from('phrase_audio')
+      .select('phrase_id, storage_path')
     if (error || !data) return
 
-    const existing = await idbLoadAllAudio()
-    for (const row of data as { phrase_id: string; data_url: string }[]) {
-      if (!existing[row.phrase_id] && row.data_url) {
-        await idbSaveAudio(row.phrase_id, row.data_url)
-      }
+    const map: Record<string, string> = {}
+    for (const row of data as { phrase_id: string; storage_path: string }[]) {
+      if (!row.phrase_id || !row.storage_path) continue
+      const { data: pub } = supabase.storage.from(AUDIO_BUCKET).getPublicUrl(row.storage_path)
+      map[row.phrase_id] = pub.publicUrl
     }
+    setRemoteAudioUrls(map)
   } catch {
-    // silent
+    // silent — app still works offline with local audio
   }
+}
+
+/**
+ * Upload every local IndexedDB recording to the shared cloud.
+ * Call this once from admin after deploying the shared-audio fix.
+ */
+export async function syncAllLocalAudioToCloud(): Promise<{ ok: number; failed: number }> {
+  const all = await idbLoadAllAudio()
+  let ok = 0
+  let failed = 0
+  for (const [phraseId, blob] of Object.entries(all)) {
+    try {
+      await saveAudio(phraseId, blob)
+      ok++
+    } catch {
+      failed++
+    }
+  }
+  return { ok, failed }
 }
 
 /** Migrate any audio previously stored in localStorage to IndexedDB. */

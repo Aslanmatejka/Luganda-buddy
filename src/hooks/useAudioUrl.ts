@@ -9,21 +9,22 @@ export function useAudioUrl(phraseId: string) {
   const reload = useCallback(async () => {
     const next = await idbLoadAudio(phraseId)
     setUrl((prev) => {
-      if (prev && prev !== next) URL.revokeObjectURL(prev)
+      // Only revoke blob: object URLs we created — never revoke https cloud URLs
+      if (prev && prev.startsWith('blob:') && prev !== next) URL.revokeObjectURL(prev)
       return next
     })
-    setHasAudio(hasAudioIndexed(phraseId))
+    setHasAudio(Boolean(next) || hasAudioIndexed(phraseId))
   }, [phraseId])
 
   useEffect(() => {
     void reload()
     const unsub = onAudioChange((id) => {
-      if (id === phraseId) void reload()
+      if (id === phraseId || id === '*') void reload()
     })
     return () => {
       unsub()
       setUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev)
+        if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev)
         return null
       })
     }

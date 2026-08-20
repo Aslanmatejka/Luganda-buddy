@@ -8,6 +8,7 @@ import {
   newPhraseId,
   removeAudio,
   saveAudio,
+  syncAllLocalAudioToCloud,
   upsertCustomPhrase,
 } from '../services/customPhrases'
 import { Button } from '../components/ui/Button'
@@ -315,8 +316,29 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
   const [filter, setFilter] = useState<CategoryId | 'all'>('all')
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<Phrase | null | 'new'>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
   const refresh = useCallback(() => setPhrases(allPhrases()), [])
+
+  const handleSyncCloud = async () => {
+    setSyncing(true)
+    setSyncMsg(null)
+    try {
+      const { ok, failed } = await syncAllLocalAudioToCloud()
+      setSyncMsg(
+        failed > 0
+          ? `Shared ${ok} voices. ${failed} failed — try again.`
+          : ok === 0
+            ? 'No local voices found to share. Record some first.'
+            : `Shared ${ok} voices with everyone. ✓`,
+      )
+    } catch (err) {
+      setSyncMsg(err instanceof Error ? err.message : 'Sync failed')
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const visible = phrases.filter((p) => {
     const catOk = filter === 'all' || p.categoryId === filter
@@ -334,6 +356,23 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
         </div>
         <button type="button" onClick={() => setEditing('new')} className="shrink-0 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0e0e12]">Add</button>
       </header>
+
+      <div className="mb-4 rounded-xl border border-white/10 bg-[#16161d] p-3">
+        <p className="text-xs text-[#8b8b9e]">
+          New recordings upload to the cloud automatically. If people still can&apos;t hear older voices, share them once:
+        </p>
+        <button
+          type="button"
+          onClick={() => void handleSyncCloud()}
+          disabled={syncing}
+          className="mt-2 w-full rounded-lg border border-white/15 py-2.5 text-sm font-semibold text-white hover:bg-white/5 disabled:opacity-50"
+        >
+          {syncing ? 'Sharing voices…' : 'Share all voices with everyone'}
+        </button>
+        {syncMsg && (
+          <p className="mt-2 text-xs text-[#a1a1b5]">{syncMsg}</p>
+        )}
+      </div>
 
       <input
         type="search"

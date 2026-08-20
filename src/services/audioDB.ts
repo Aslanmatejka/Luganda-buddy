@@ -97,11 +97,10 @@ function indexRemove(id: string): void {
 }
 
 export function hasAudioIndexed(phraseId: string): boolean {
-  return readIndex().has(phraseId)
+  return readIndex().has(phraseId) || Boolean(remoteUrls[phraseId])
 }
 
 // ── change notifications ──────────────────────────────────────────────────────
-// Components subscribe to reload audio instantly after admin saves.
 
 type AudioListener = (phraseId: string) => void
 const listeners = new Set<AudioListener>()
@@ -113,6 +112,29 @@ export function onAudioChange(fn: AudioListener): () => void {
 
 function notifyAudioChange(phraseId: string): void {
   listeners.forEach((fn) => fn(phraseId))
+}
+
+// ── shared cloud URLs (loaded for every visitor) ──────────────────────────────
+
+const remoteUrls: Record<string, string> = {}
+
+export function setRemoteAudioUrl(phraseId: string, url: string | null): void {
+  if (url) remoteUrls[phraseId] = url
+  else delete remoteUrls[phraseId]
+  if (url) indexAdd(phraseId)
+  notifyAudioChange(phraseId)
+}
+
+export function setRemoteAudioUrls(map: Record<string, string>): void {
+  for (const [id, url] of Object.entries(map)) {
+    remoteUrls[id] = url
+    indexAdd(id)
+  }
+  listeners.forEach((fn) => fn('*'))
+}
+
+export function getRemoteAudioUrl(phraseId: string): string | null {
+  return remoteUrls[phraseId] ?? null
 }
 
 // ── convert legacy string → Blob ─────────────────────────────────────────────
@@ -128,8 +150,8 @@ function toBlob(value: StoredAudio): Blob {
   return new Blob([bytes], { type: mime })
 }
 
-/** Returns an object URL ready for Audio() playback */
-export async function idbLoadAudio(phraseId: string): Promise<string | null> {
+/** Local IndexedDB blob → object URL (or null) */
+async function idbLoadLocal(phraseId: string): Promise<string | null> {
   try {
     const raw = await runTx<StoredAudio | undefined>('readonly', (s) => s.get(phraseId))
     if (!raw) return null
@@ -139,6 +161,16 @@ export async function idbLoadAudio(phraseId: string): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+/**
+ * Playable URL for a phrase.
+ * Prefers local IndexedDB, then falls back to the shared cloud URL.
+ */
+export async function idbLoadAudio(phraseId: string): Promise<string | null> {
+  const local = await idbLoadLocal(phraseId)
+  if (local) return local
+  return getRemoteAudioUrl(phraseId)
 }
 
 /** Accepts a Blob or a base64 data URL string */
