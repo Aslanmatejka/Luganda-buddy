@@ -89,6 +89,8 @@ function PhraseAudioControls({ phraseId }: { phraseId: string }) {
       await saveAudio(phraseId, blob)
       reset()
       await reload()
+      setSaveError(null)
+      // brief success via existing "Saved" label after reload
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Save failed')
     } finally {
@@ -108,7 +110,7 @@ function PhraseAudioControls({ phraseId }: { phraseId: string }) {
       {hasAudio && savedUrl && state !== 'done' && (
         <div className="flex items-center gap-2">
           <PlayButton url={savedUrl} label="Play" />
-          <span className="flex-1 text-xs text-[#6b6b80]">Saved</span>
+          <span className="flex-1 text-xs font-medium text-emerald">Saved & shared</span>
           <button
             type="button"
             onClick={() => void handleDelete()}
@@ -357,9 +359,12 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
         <button type="button" onClick={() => setEditing('new')} className="shrink-0 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#0e0e12]">Add</button>
       </header>
 
-      <div className="mb-4 rounded-xl border border-white/10 bg-[#16161d] p-3">
-        <p className="text-xs text-[#8b8b9e]">
-          New recordings upload to the cloud automatically. If people still can&apos;t hear older voices, share them once:
+      <div className="mb-4 rounded-xl border border-amber/25 bg-amber/5 p-3">
+        <p className="text-xs font-semibold text-amber">
+          Previous voices were lost in an update (they were only on this phone, never in the cloud).
+        </p>
+        <p className="mt-1 text-xs text-[#8b8b9e]">
+          Please re-record. Each new save is uploaded to the cloud so everyone with the link can hear it.
         </p>
         <button
           type="button"

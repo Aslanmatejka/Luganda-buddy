@@ -5,7 +5,7 @@
 
 const DB_NAME = 'luganda-buddy'
 const STORE_NAME = 'audio'
-const DB_VERSION = 2
+const DB_VERSION = 3
 const INDEX_KEY = 'luganda-buddy-audio-index'
 
 export type StoredAudio = Blob | string // string = legacy base64 data URL
@@ -20,15 +20,11 @@ function getDB(): Promise<IDBDatabase> {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
-      req.onupgradeneeded = (e) => {
+      req.onupgradeneeded = () => {
         const db = req.result
-        // v1 → v2: recreate store cleanly
-        if (e.oldVersion < 1) {
-          db.createObjectStore(STORE_NAME)
-        } else if (e.oldVersion < 2) {
-          if (db.objectStoreNames.contains(STORE_NAME)) {
-            db.deleteObjectStore(STORE_NAME)
-          }
+        // NEVER delete the store — that wiped user recordings in v2.
+        // Only create it if missing.
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
           db.createObjectStore(STORE_NAME)
         }
       }

@@ -163,6 +163,15 @@ export async function saveAudio(phraseId: string, source: Blob | string): Promis
   }
 
   const path = `${phraseId}.${extForBlob(blob)}`
+
+  // Remove any previous extension variants, then upload fresh
+  await supabase.storage.from(AUDIO_BUCKET).remove([
+    `${phraseId}.webm`,
+    `${phraseId}.mp4`,
+    `${phraseId}.ogg`,
+    `${phraseId}.mp3`,
+  ])
+
   const { error: upErr } = await supabase.storage.from(AUDIO_BUCKET).upload(path, blob, {
     upsert: true,
     contentType: blob.type || 'audio/webm',
@@ -176,7 +185,14 @@ export async function saveAudio(phraseId: string, source: Blob | string): Promis
   )
   if (dbErr) throw new Error(`Cloud save failed: ${dbErr.message}`)
 
-  setRemoteAudioUrl(phraseId, publicUrlFor(path))
+  // Verify the public file is reachable
+  const url = publicUrlFor(path)
+  const probe = await fetch(url, { method: 'HEAD' }).catch(() => null)
+  if (probe && !probe.ok) {
+    throw new Error('Upload finished but file is not publicly readable yet — try again')
+  }
+
+  setRemoteAudioUrl(phraseId, url)
 }
 
 export async function removeAudio(phraseId: string): Promise<void> {
