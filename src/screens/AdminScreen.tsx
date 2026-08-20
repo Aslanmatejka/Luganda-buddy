@@ -5,11 +5,13 @@ import { useAudioUrl } from '../hooks/useAudioUrl'
 import {
   allPhrases,
   countCloudAudio,
+  countCloudPhrases,
   deleteCustomPhrase,
   newPhraseId,
   removeAudio,
   saveAudio,
   syncAllLocalAudioToCloud,
+  syncAllLocalPhrasesToCloud,
   upsertCustomPhrase,
 } from '../services/customPhrases'
 import { Button } from '../components/ui/Button'
@@ -195,6 +197,8 @@ function PhraseModal({
   const [draft, setDraft] = useState<Phrase>(() =>
     initial ? { ...initial } : { id: newPhraseId('greetings'), ...emptyDraft() },
   )
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const set = (key: keyof Phrase) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -209,11 +213,20 @@ function PhraseModal({
     }))
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!draft.luganda.trim() || !draft.english.trim()) return
-    upsertCustomPhrase({ ...draft, custom: true })
-    onSaved(draft)
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const phrase = { ...draft, custom: true }
+      await upsertCustomPhrase(phrase)
+      onSaved(phrase)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const inputCls =
@@ -223,15 +236,15 @@ function PhraseModal({
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-md sm:items-center">
       <div className="animate-pop w-full max-w-md overflow-y-auto rounded-t-[28px] border border-white/10 bg-[#16161d] p-6 pb-10 sm:rounded-[28px]">
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="font-display text-2xl font-semibold text-white">
+          <h2 className="text-2xl font-semibold text-white">
             {isNew ? 'New phrase' : 'Edit phrase'}
           </h2>
           <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full bg-white/8 text-[#8b8b9e]">×</button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
           <div>
-            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">Category</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-[#5a5a72]">Category</label>
             <select value={draft.categoryId} onChange={onCategoryChange} className={inputCls}>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>
@@ -239,25 +252,35 @@ function PhraseModal({
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">Luganda</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-[#5a5a72]">Luganda</label>
             <input type="text" value={draft.luganda} onChange={set('luganda')} required className={inputCls} placeholder="e.g. Oli otya?" />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">English</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-[#5a5a72]">English</label>
             <input type="text" value={draft.english} onChange={set('english')} required className={inputCls} placeholder="e.g. How are you?" />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">Pronunciation</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-[#5a5a72]">Pronunciation</label>
             <input type="text" value={draft.pronunciation} onChange={set('pronunciation')} className={inputCls} placeholder="e.g. oh-lee oh-CHA" />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-extrabold uppercase tracking-widest text-[#5a5a72]">Explanation</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-[#5a5a72]">Explanation</label>
             <textarea value={draft.explanation} onChange={set('explanation')} rows={2} className={`${inputCls} resize-none`} />
           </div>
 
+          {saveError && (
+            <p className="rounded-lg border border-rose/25 bg-rose/10 px-3 py-2 text-xs text-rose">{saveError}</p>
+          )}
+
           <div className="flex gap-3 pt-1">
-            <Button type="button" variant="secondary" onClick={onClose} className="flex-1">Cancel</Button>
-            <button type="submit" className="inline-flex min-h-[48px] flex-1 items-center justify-center rounded-xl bg-white px-4 py-3 text-[15px] font-semibold text-[#0e0e12]">Save phrase</button>
+            <Button type="button" variant="secondary" onClick={onClose} className="flex-1" disabled={saving}>Cancel</Button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex min-h-[48px] flex-1 items-center justify-center rounded-xl bg-white px-4 py-3 text-[15px] font-semibold text-[#0e0e12] disabled:opacity-50"
+            >
+              {saving ? 'Saving to database…' : 'Save phrase'}
+            </button>
           </div>
         </form>
       </div>
@@ -330,31 +353,37 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
   const [editing, setEditing] = useState<Phrase | null | 'new'>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
-  const [cloudCount, setCloudCount] = useState<number | null>(null)
+  const [cloudAudioCount, setCloudAudioCount] = useState<number | null>(null)
+  const [cloudPhraseCount, setCloudPhraseCount] = useState<number | null>(null)
 
   const refresh = useCallback(() => setPhrases(allPhrases()), [])
 
-  const refreshCloudCount = useCallback(async () => {
-    const n = await countCloudAudio()
-    setCloudCount(n)
+  const refreshCloudCounts = useCallback(async () => {
+    const [audio, words] = await Promise.all([countCloudAudio(), countCloudPhrases()])
+    setCloudAudioCount(audio)
+    setCloudPhraseCount(words)
   }, [])
 
   useEffect(() => {
-    void refreshCloudCount()
-  }, [refreshCloudCount])
+    void refreshCloudCounts()
+  }, [refreshCloudCounts])
 
   const handleSyncCloud = async () => {
     setSyncing(true)
     setSyncMsg(null)
     try {
-      const { ok, failed } = await syncAllLocalAudioToCloud()
-      await refreshCloudCount()
+      const [phrasesRes, audioRes] = await Promise.all([
+        syncAllLocalPhrasesToCloud(),
+        syncAllLocalAudioToCloud(),
+      ])
+      await refreshCloudCounts()
+      refresh()
       setSyncMsg(
-        failed > 0
-          ? `Uploaded ${ok} to database. ${failed} failed — try again.`
-          : ok === 0
-            ? 'No local voices found. Record some first, then they will upload automatically.'
-            : `Uploaded ${ok} voices to the database. ✓`,
+        `Words: ${phrasesRes.ok} uploaded` +
+          (phrasesRes.failed ? `, ${phrasesRes.failed} failed` : '') +
+          `. Voices: ${audioRes.ok} uploaded` +
+          (audioRes.failed ? `, ${audioRes.failed} failed` : '') +
+          '.',
       )
     } catch (err) {
       setSyncMsg(err instanceof Error ? err.message : 'Sync failed')
@@ -382,10 +411,12 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
 
       <div className="mb-4 rounded-xl border border-white/10 bg-[#16161d] p-3">
         <p className="text-xs font-semibold text-white">
-          Database voices: {cloudCount === null ? '…' : cloudCount}
+          Database words: {cloudPhraseCount === null ? '…' : cloudPhraseCount}
+          {' · '}
+          Database voices: {cloudAudioCount === null ? '…' : cloudAudioCount}
         </p>
         <p className="mt-1 text-xs text-[#8b8b9e]">
-          Every Save uploads the file and writes a database row. Other people only hear voices that are in the database.
+          Saving a phrase or voice writes to the database. Other people only see what is in the database.
         </p>
         <button
           type="button"
@@ -393,14 +424,14 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
           disabled={syncing}
           className="mt-2 w-full rounded-lg border border-white/15 py-2.5 text-sm font-semibold text-white hover:bg-white/5 disabled:opacity-50"
         >
-          {syncing ? 'Uploading to database…' : 'Upload all local voices to database'}
+          {syncing ? 'Uploading to database…' : 'Upload all local words & voices to database'}
         </button>
         <button
           type="button"
-          onClick={() => void refreshCloudCount()}
+          onClick={() => void refreshCloudCounts()}
           className="mt-2 w-full rounded-lg border border-white/10 py-2 text-xs font-medium text-[#8b8b9e] hover:text-white"
         >
-          Refresh database count
+          Refresh database counts
         </button>
         {syncMsg && (
           <p className="mt-2 text-xs text-[#a1a1b5]">{syncMsg}</p>
@@ -444,11 +475,15 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
             key={phrase.id}
             phrase={phrase}
             onEdit={() => setEditing(phrase)}
-            onCloudSaved={() => void refreshCloudCount()}
+            onCloudSaved={() => void refreshCloudCounts()}
             onDelete={() => {
               if (confirm(`Delete "${phrase.luganda}"?`)) {
-                deleteCustomPhrase(phrase.id)
-                refresh()
+                void deleteCustomPhrase(phrase.id).then(() => {
+                  refresh()
+                  void refreshCloudCounts()
+                }).catch((err: unknown) => {
+                  alert(err instanceof Error ? err.message : 'Delete failed')
+                })
               }
             }}
           />
@@ -459,7 +494,11 @@ export function AdminScreen({ onClose }: { onClose: () => void }) {
         <PhraseModal
           initial={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); refresh() }}
+          onSaved={() => {
+            setEditing(null)
+            refresh()
+            void refreshCloudCounts()
+          }}
         />
       )}
     </div>

@@ -50,15 +50,20 @@ export default function App() {
   const { isAdmin, isChecking, signIn } = useAdminAccess()
   const { screen, navigate } = useScreen()
   const [showClaim, setShowClaim] = useState(false)
+  const [contentKey, setContentKey] = useState(0)
 
   useEffect(() => {
-    const run = () => {
+    const run = async () => {
       warmUpSpeech()
-      void fetchRemoteCustomPhrases()
-      void fetchRemoteAudio()
-      void migrateAudioFromLS()
+      await Promise.all([
+        fetchRemoteCustomPhrases(),
+        fetchRemoteAudio(),
+        migrateAudioFromLS(),
+      ])
+      // Remount screens so newly synced words/voices appear without refresh
+      setContentKey((k) => k + 1)
     }
-    const t = window.setTimeout(run, 100)
+    const t = window.setTimeout(() => { void run() }, 100)
     return () => window.clearTimeout(t)
   }, [])
 
@@ -100,7 +105,7 @@ export default function App() {
 
     return (
       <Shell>
-        <AdminScreen onClose={() => navigate({ name: 'home' })} />
+        <AdminScreen key={`admin-${contentKey}`} onClose={() => navigate({ name: 'home' })} />
       </Shell>
     )
   }
@@ -110,6 +115,7 @@ export default function App() {
     return (
       <Shell>
         <LessonScreen
+          key={`lesson-${contentKey}-${categoryId}`}
           categoryId={categoryId}
           learnedIds={progress.learnedIds}
           onExit={() => navigate({ name: 'home' })}
@@ -138,7 +144,7 @@ export default function App() {
   return (
     <Shell>
       <div className="relative">
-        <HomeScreen progress={progress} onStart={startLesson} />
+        <HomeScreen key={`home-${contentKey}`} progress={progress} onStart={startLesson} />
 
         {isAdmin && (
           <button

@@ -1,15 +1,23 @@
 /**
  * Custom phrases and voice recordings.
- * localStorage is always the source-of-truth for instant reads;
- * Supabase is synced in the background for persistence across devices.
+ * localStorage for instant reads; Supabase is the shared source of truth.
  */
 
 import { phrases as builtIn } from '../data/content'
 import { supabase, getDeviceId } from '../lib/supabase'
 import { safeGetItem, safeRemoveItem, safeSetItem } from '../lib/storageSafe'
+import {
+  idbLoadAudio,
+  idbLoadAllAudio,
+  idbRemoveAudio,
+  idbSaveAudio,
+  setRemoteAudioUrl,
+  setRemoteAudioUrls,
+} from './audioDB'
 import type { CategoryId, Phrase } from '../types'
 
 const LS_PHRASES_KEY = 'luganda-buddy-custom-phrases-v1'
+const AUDIO_BUCKET = 'phrase-audio'
 
 // ── local phrase helpers ──────────────────────────────────────────────────────
 
@@ -34,10 +42,10 @@ function phraseToRow(p: Phrase) {
   return {
     id: p.id,
     device_id: getDeviceId(),
-    luganda: p.luganda,
-    english: p.english,
-    pronunciation: p.pronunciation,
-    explanation: p.explanation,
+    luganda: p.luganda.trim(),
+    english: p.english.trim(),
+    pronunciation: (p.pronunciation || '').trim(),
+    explanation: (p.explanation || '').trim(),
     category_id: p.categoryId,
     updated_at: new Date().toISOString(),
   }
@@ -55,62 +63,104 @@ function rowToPhrase(row: Record<string, unknown>): Phrase {
   }
 }
 
-/** Pull custom phrases from Supabase and merge with local. */
+/** Pull ALL shared custom phrases (not filtered by device) and merge locally. */
 export async function fetchRemoteCustomPhrases(): Promise<void> {
   if (!supabase) return
   try {
     const { data, error } = await supabase
       .from('custom_phrases')
       .select('*')
-      .eq('device_id', getDeviceId())
+      .order('updated_at', { ascending: false })
     if (error || !data) return
 
     const remote = (data as Record<string, unknown>[]).map(rowToPhrase)
     const local = loadCustomPhrases()
-    const localIds = new Set(local.map((p) => p.id))
+    const byId = new Map<string, Phrase>()
 
-    // Add remote phrases not yet in local
-    const merged = [...local]
-    for (const rp of remote) {
-      if (!localIds.has(rp.id)) merged.push(rp)
-    }
-    saveCustomPhrasesLS(merged)
+    // Local first, then remote overwrites (shared DB is source of truth)
+    for (const p of local) byId.set(p.id, p)
+    for (const p of remote) byId.set(p.id, p)
+
+    saveCustomPhrasesLS([...byId.values()])
   } catch {
-    // silent
+    // silent — offline still works with local phrases
   }
 }
 
-// ── public CRUD ───────────────────────────────────────────────────────────────
-
-export function upsertCustomPhrase(phrase: Phrase): void {
-  const all = loadCustomPhrases()
-  const idx = all.findIndex((p) => p.id === phrase.id)
-  if (idx >= 0) {
-    all[idx] = { ...phrase, custom: true }
-  } else {
-    all.push({ ...phrase, custom: true })
+/**
+ * Save phrase locally AND to the shared database.
+ * Throws unless the database row is confirmed.
+ */
+export async function upsertCustomPhrase(phrase: Phrase): Promise<void> {
+  const saved: Phrase = {
+    ...phrase,
+    luganda: phrase.luganda.trim(),
+    english: phrase.english.trim(),
+    custom: true,
   }
+  if (!saved.luganda || !saved.english) {
+    throw new Error('Luganda and English are required')
+  }
+
+  const all = loadCustomPhrases()
+  const idx = all.findIndex((p) => p.id === saved.id)
+  if (idx >= 0) all[idx] = saved
+  else all.push(saved)
   saveCustomPhrasesLS(all)
 
-  // background sync
-  if (supabase) {
-    void Promise.resolve(
-      supabase
-        .from('custom_phrases')
-        .upsert(phraseToRow({ ...phrase, custom: true }), { onConflict: 'id' }),
-    ).catch(() => {})
+  if (!supabase) {
+    throw new Error('Cloud sync unavailable — phrase saved only on this device')
+  }
+
+  const { error } = await supabase
+    .from('custom_phrases')
+    .upsert(phraseToRow(saved), { onConflict: 'id' })
+  if (error) throw new Error(`Database save failed: ${error.message}`)
+
+  const { data: verified, error: verifyErr } = await supabase
+    .from('custom_phrases')
+    .select('id, luganda, english')
+    .eq('id', saved.id)
+    .maybeSingle()
+
+  if (verifyErr || !verified?.id) {
+    throw new Error('Saved locally but database verification failed — try again')
   }
 }
 
-export function deleteCustomPhrase(id: string): void {
+export async function deleteCustomPhrase(id: string): Promise<void> {
   saveCustomPhrasesLS(loadCustomPhrases().filter((p) => p.id !== id))
   void removeAudio(id)
 
-  if (supabase) {
-    void Promise.resolve(
-      supabase.from('custom_phrases').delete().eq('id', id).eq('device_id', getDeviceId()),
-    ).catch(() => {})
+  if (!supabase) return
+  const { error } = await supabase.from('custom_phrases').delete().eq('id', id)
+  if (error) throw new Error(`Database delete failed: ${error.message}`)
+}
+
+/** How many custom/edited phrases are in the shared database. */
+export async function countCloudPhrases(): Promise<number> {
+  if (!supabase) return 0
+  const { count, error } = await supabase
+    .from('custom_phrases')
+    .select('id', { count: 'exact', head: true })
+  if (error) return 0
+  return count ?? 0
+}
+
+/** Upload every local custom phrase to the shared database. */
+export async function syncAllLocalPhrasesToCloud(): Promise<{ ok: number; failed: number }> {
+  const all = loadCustomPhrases()
+  let ok = 0
+  let failed = 0
+  for (const phrase of all) {
+    try {
+      await upsertCustomPhrase(phrase)
+      ok++
+    } catch {
+      failed++
+    }
   }
+  return { ok, failed }
 }
 
 /** All phrases: built-in merged with custom. Audio is loaded separately via loadAudio(). */
@@ -121,13 +171,11 @@ export function allPhrases(): Phrase[] {
   return [...base, ...custom]
 }
 
-// ── audio storage — IndexedDB ─────────────────────────────────────────────────
-// Audio recordings are stored in IndexedDB (no size limit).
-// The old localStorage audio key is intentionally left alone for migration below.
+export function saveCustomPhrases(phrases: Phrase[]): void {
+  saveCustomPhrasesLS(phrases)
+}
 
-import { idbLoadAudio, idbLoadAllAudio, idbRemoveAudio, idbSaveAudio, setRemoteAudioUrl, setRemoteAudioUrls } from './audioDB'
-
-const AUDIO_BUCKET = 'phrase-audio'
+// ── audio storage ─────────────────────────────────────────────────────────────
 
 function extForBlob(blob: Blob): string {
   if (blob.type.includes('mp4')) return 'mp4'
@@ -139,7 +187,6 @@ function extForBlob(blob: Blob): string {
 function publicUrlFor(path: string): string {
   if (!supabase) return ''
   const { data } = supabase.storage.from(AUDIO_BUCKET).getPublicUrl(path)
-  // Cache-bust so updated recordings replace immediately
   return `${data.publicUrl}?t=${Date.now()}`
 }
 
@@ -165,7 +212,6 @@ export async function saveAudio(phraseId: string, source: Blob | string): Promis
     throw new Error('Recording is empty or too short — please record again')
   }
 
-  // 1) Always keep a local copy first
   await idbSaveAudio(phraseId, blob)
 
   if (!supabase) {
@@ -176,7 +222,6 @@ export async function saveAudio(phraseId: string, source: Blob | string): Promis
   const mime = blob.type || 'audio/webm'
   const publicUrl = cleanPublicUrl(path)
 
-  // 2) Replace any previous files for this phrase
   await supabase.storage.from(AUDIO_BUCKET).remove([
     `${phraseId}.webm`,
     `${phraseId}.mp4`,
@@ -184,7 +229,6 @@ export async function saveAudio(phraseId: string, source: Blob | string): Promis
     `${phraseId}.mp3`,
   ])
 
-  // 3) Upload bytes to Storage
   const { error: upErr } = await supabase.storage.from(AUDIO_BUCKET).upload(path, blob, {
     upsert: true,
     contentType: mime,
@@ -192,7 +236,6 @@ export async function saveAudio(phraseId: string, source: Blob | string): Promis
   })
   if (upErr) throw new Error(`Cloud upload failed: ${upErr.message}`)
 
-  // 4) Write / update the database row (this is what other devices look up)
   const row = {
     phrase_id: phraseId,
     storage_path: path,
@@ -206,7 +249,6 @@ export async function saveAudio(phraseId: string, source: Blob | string): Promis
     .upsert(row, { onConflict: 'phrase_id' })
   if (dbErr) throw new Error(`Database save failed: ${dbErr.message}`)
 
-  // 5) Verify the row actually exists in the database
   const { data: verified, error: verifyErr } = await supabase
     .from('phrase_audio')
     .select('phrase_id, storage_path, public_url')
@@ -239,7 +281,6 @@ export async function loadAudio(phraseId: string): Promise<string | null> {
   return idbLoadAudio(phraseId)
 }
 
-/** How many shared voices are currently in the database. */
 export async function countCloudAudio(): Promise<number> {
   if (!supabase) return 0
   const { count, error } = await supabase
@@ -249,7 +290,6 @@ export async function countCloudAudio(): Promise<number> {
   return count ?? 0
 }
 
-/** Pull shared recordings for EVERY visitor (not filtered by device). */
 export async function fetchRemoteAudio(): Promise<void> {
   if (!supabase) return
   try {
@@ -265,22 +305,15 @@ export async function fetchRemoteAudio(): Promise<void> {
       public_url: string | null
     }[]) {
       if (!row.phrase_id) continue
-      if (row.public_url) {
-        map[row.phrase_id] = row.public_url
-      } else if (row.storage_path) {
-        map[row.phrase_id] = cleanPublicUrl(row.storage_path)
-      }
+      if (row.public_url) map[row.phrase_id] = row.public_url
+      else if (row.storage_path) map[row.phrase_id] = cleanPublicUrl(row.storage_path)
     }
     setRemoteAudioUrls(map)
   } catch {
-    // silent — app still works offline with local audio
+    // silent
   }
 }
 
-/**
- * Upload every local IndexedDB recording to the shared cloud.
- * Call this once from admin after deploying the shared-audio fix.
- */
 export async function syncAllLocalAudioToCloud(): Promise<{ ok: number; failed: number }> {
   const all = await idbLoadAllAudio()
   let ok = 0
@@ -296,19 +329,15 @@ export async function syncAllLocalAudioToCloud(): Promise<{ ok: number; failed: 
   return { ok, failed }
 }
 
-/** Migrate any audio previously stored in localStorage to IndexedDB. */
 export async function migrateAudioFromLS(): Promise<void> {
   const LS_AUDIO_KEY = 'luganda-buddy-audio-v1'
   try {
     const raw = safeGetItem(LS_AUDIO_KEY)
     if (!raw) return
-
-    // Old audio blobs can be huge and freeze the app on parse — skip if too large
     if (raw.length > 400_000) {
       safeRemoveItem(LS_AUDIO_KEY)
       return
     }
-
     const map = JSON.parse(raw) as Record<string, string>
     const existing = await idbLoadAllAudio()
     for (const [id, url] of Object.entries(map)) {
@@ -320,8 +349,6 @@ export async function migrateAudioFromLS(): Promise<void> {
   }
 }
 
-// ── ID generation ─────────────────────────────────────────────────────────────
-
 export function newPhraseId(categoryId: CategoryId): string {
   const existing = [
     ...builtIn.map((p) => p.id),
@@ -331,9 +358,4 @@ export function newPhraseId(categoryId: CategoryId): string {
   let n = 1
   while (existing.includes(`${prefix}${n}`)) n++
   return `${prefix}${n}`
-}
-
-// ── keep for backwards compatibility ─────────────────────────────────────────
-export function saveCustomPhrases(phrases: Phrase[]): void {
-  saveCustomPhrasesLS(phrases)
 }
